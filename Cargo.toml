@@ -1,0 +1,21 @@
+[package]
+name = "tracing-chrometrace"
+version = "0.1.0"
+edition = "2018"
+
+authors = ["Youseok Yang <ileixe@gmail.com>"]
+categories = ["asynchronous", "development-tools::debugging", "development-tools::profiling"]
+description = "A Layer for tracing-subscriber that outputs Chrome-style traces."
+documentation = "https://docs.rs/tracing-chrometrace"
+keywords = ["profiling", "tracing", "flamegraph", "subscriber"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/ileixe/tracing-chrometrace"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+strum = { version = "0.22", features = ["derive"] }
+strum_macros = "0.22"
+tracing = "0.1.29"
+tracing-subscriber = { version = "0.3", features = ["fmt", "std"] }
