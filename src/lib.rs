@@ -215,7 +215,16 @@ where
     fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
 
-        if let Some(fields) = span.extensions().get::<Fields>() {
+        let mut extensions = span.extensions_mut();
+
+        if let Some(started) = extensions.get_mut::<bool>() {
+            // If recoding of the span is already started (async case), skip it
+            return;
+        } else {
+            extensions.insert(true);
+        }
+
+        if let Some(fields) = extensions.get_mut::<Fields>() {
             let description =
                 EventDescription::new(self.start, EventType::DurationBegin, fields.inner.clone());
 
@@ -224,8 +233,10 @@ where
         };
     }
 
-    fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
+    fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {}
+
+    fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
+        let span = ctx.span(&id).expect("Span not found, this is a bug");
 
         if let Some(fields) = span.extensions().get::<Fields>() {
             let description =
