@@ -158,9 +158,8 @@ impl<S, W> ChromeLayer<S, W> {
     fn write(&self, writer: &mut dyn io::Write, description: &EventDescription) -> io::Result<()> {
         io::Write::write_all(
             writer,
-            serde_json::to_string(description).unwrap().as_bytes(),
-        )?;
-        io::Write::write_all(writer, b", \n")
+            (",".to_owned() + &serde_json::to_string(description).unwrap() + "\n").as_bytes(),
+        )
     }
 }
 
