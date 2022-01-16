@@ -80,15 +80,19 @@ impl Serialize for EventType {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct EventDescription {
     name: String,
     cat: String,
     ph: EventType,
     ts: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
+    dur: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tts: Option<u64>,
-    pid: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    pid: u64,
     tid: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     args: Option<HashMap<String, String>>,
@@ -106,16 +110,36 @@ impl EventDescription {
 
         let ts = fields
             .remove("ts")
-            .map_or(start.elapsed().as_micros(), |x| x.parse().unwrap());
+            .map_or(start.elapsed().as_micros(), |x| {
+                x.trim_matches('"').parse().unwrap()
+            });
+
+        let dur = fields
+            .remove("dur")
+            .map_or(None, |x| Some(x.trim_matches('"').parse().unwrap()));
+
+        let id = fields.remove("id");
+
+        let pid = fields.remove("pid").map_or(process::id() as u64, |x| {
+            x.trim_matches('"').parse().unwrap()
+        });
+
+        let tid = fields
+            .remove("tid")
+            .map_or(thread::current().id().as_u64().get(), |x| {
+                x.trim_matches('"').parse().unwrap()
+            });
 
         EventDescription {
             name,
             cat,
             ph: event_type,
+            dur,
             ts,
-            tts: None,
-            pid: process::id(),
-            tid: thread::current().id().as_u64().get(),
+            tts: None, // Not yet supported
+            id,
+            pid,
+            tid,
             args: if fields.len() > 0 { Some(fields) } else { None },
         }
     }
@@ -145,7 +169,8 @@ impl<S, W> ChromeLayer<S, W> {
     {
         // TODO: Any other way to make a valid JSON array? Note that we even don't have close parenthesis.
         let mut writer = make_writer.make_writer();
-        io::Write::write_all(&mut writer, b"[").unwrap();
+        // Add dummy empty entry to make valid JSON
+        io::Write::write_all(&mut writer, b"[{}\n").unwrap();
         drop(writer);
 
         ChromeLayer {
@@ -224,8 +249,16 @@ where
         }
 
         if let Some(fields) = extensions.get_mut::<Fields>() {
-            let description =
-                EventDescription::new(self.start, EventType::DurationBegin, fields.inner.clone());
+            let mut fields = fields.inner.clone();
+
+            let event_type = fields
+                .remove("event")
+                .map_or(EventType::DurationBegin, |e| {
+                    EventType::from_str(&e.trim_matches('"'))
+                        .expect(format!("EventType expected, not {:?}", e).as_str())
+                });
+
+            let description = EventDescription::new(self.start, event_type, fields);
 
             let mut writer = self.make_writer.make_writer();
             self.write(&mut writer, &description).unwrap();
@@ -238,8 +271,14 @@ where
         let span = ctx.span(&id).expect("Span not found, this is a bug");
 
         if let Some(fields) = span.extensions().get::<Fields>() {
-            let description =
-                EventDescription::new(self.start, EventType::DurationEnd, fields.inner.clone());
+            let mut fields = fields.inner.clone();
+
+            let event_type = fields.remove("event").map_or(EventType::DurationEnd, |e| {
+                EventType::from_str(&e.trim_matches('"'))
+                    .expect(format!("EventType expected, not {:?}", e).as_str())
+            });
+
+            let description = EventDescription::new(self.start, event_type, fields);
 
             let mut writer = self.make_writer.make_writer();
             self.write(&mut writer, &description).unwrap();
