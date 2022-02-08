@@ -147,7 +147,7 @@ impl EventDescription {
 
 #[derive(Debug)]
 pub struct ChromeLayer<S, W = fn() -> std::io::Stdout> {
-    start: Instant,
+    pub start: Instant,
     make_writer: W,
     _inner: PhantomData<S>,
 }
