@@ -233,7 +233,8 @@ where
 
         let mut writer = self.make_writer.make_writer();
 
-        self.write(&mut writer, &description).unwrap();
+        self.write(&mut writer, &description)
+            .expect("Failed to write event in tracing-chrometrace");
     }
 
     fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
@@ -261,7 +262,8 @@ where
             let description = EventDescription::new(self.start, event_type, fields);
 
             let mut writer = self.make_writer.make_writer();
-            self.write(&mut writer, &description).unwrap();
+            self.write(&mut writer, &description)
+                .expect("Failed to write event in tracing-chrometrace");
         };
     }
 
@@ -281,7 +283,8 @@ where
             let description = EventDescription::new(self.start, event_type, fields);
 
             let mut writer = self.make_writer.make_writer();
-            self.write(&mut writer, &description).unwrap();
+            self.write(&mut writer, &description)
+                .expect("Failed to write event in tracing-chrometrace");
         };
     }
 }
