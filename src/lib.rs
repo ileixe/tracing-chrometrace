@@ -85,11 +85,11 @@ struct EventDescription {
     name: String,
     cat: String,
     ph: EventType,
-    ts: u128,
+    ts: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    dur: Option<u128>,
+    dur: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tts: Option<u64>,
+    tts: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     pid: u64,
@@ -110,7 +110,7 @@ impl EventDescription {
 
         let ts = fields
             .remove("ts")
-            .map_or(start.elapsed().as_micros(), |x| {
+            .map_or(start.elapsed().as_nanos() as f64 / 1000., |x| {
                 x.trim_matches('"').parse().unwrap()
             });
 
@@ -242,7 +242,7 @@ where
 
         let mut extensions = span.extensions_mut();
 
-        if let Some(started) = extensions.get_mut::<bool>() {
+        if extensions.get_mut::<bool>().is_some() {
             // If recoding of the span is already started (async case), skip it
             return;
         } else {
@@ -267,7 +267,7 @@ where
         };
     }
 
-    fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {}
+    fn on_exit(&self, _id: &span::Id, _ctx: Context<'_, S>) {}
 
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(&id).expect("Span not found, this is a bug");
