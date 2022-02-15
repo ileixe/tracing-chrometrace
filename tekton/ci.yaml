@@ -1,0 +1,113 @@
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: Trigger
+metadata:
+  name: tracing-chrometrace-pull-request
+  namespace: ci-tracing-chrometrace
+  labels:
+    ci.tekton.dev/trigger-type: github.pull-request
+spec:
+  interceptors:
+    - cel:
+        filter: >-
+          body.repository.name in ['tracing-chrometrace']
+  bindings:
+    - ref: tekton-ci-github-base
+    - ref: tekton-ci-webhook-pull-request
+  template:
+    ref: tracing-chrometrace
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: tracing-chrometrace
+  namespace: ci-tracing-chrometrace
+spec:
+  params:
+  - name: owner
+    description: The git repository owner
+  - name: repo
+    description: The git repository name
+  - name: gitRepository
+    description: The git repository that hosts context and Dockerfile
+  - name: gitRevision
+    description: The git revision to be used.
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: "tracing-chrometrace-run-"
+        namespace: "ci-tracing-chrometrace"
+        annotations:
+          github.integrations.tekton.dev/owner: "$(tt.params.owner)"
+          github.integrations.tekton.dev/repo: "$(tt.params.repo)"
+          github.integrations.tekton.dev/url: "https://tekton.office.furiosa.in/#/namespaces/{{ .Namespace }}/taskruns/{{ .Name }}"
+          github.integrations.tekton.dev/commit: "$(tt.params.gitRevision)"
+      spec:
+        params:
+          - name: gitRepository
+            value: "$(tt.params.gitRepository)"
+          - name: gitRevision
+            value: "$(tt.params.gitRevision)"
+        workspaces:
+          - name: source
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteMany
+                resources:
+                  requests:
+                    storage: 10Gi
+        pipelineRef:
+          name: tracing-chrometrace
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: tracing-chrometrace
+  namespace: ci-tracing-chrometrace
+  annotations:
+    description: |
+      Run integration tests against tracing-chrometrace
+spec:
+  params:
+    - name: gitRepository
+      description: The git repository that hosts context and Dockerfile
+    - name: gitRevision
+      description: The Git revision to be used.
+      default: master
+  workspaces:
+    - name: source
+      description: Workspace where the git repo is prepared for testing
+  tasks:
+  - name: clone
+    taskRef:
+      name: git-clone
+    workspaces:
+      - name: output
+        workspace: source
+    params:
+    - name: url
+      value: $(params.gitRepository)
+    - name: revision
+      value: $(params.gitRevision)
+
+  - name: test
+    taskRef:
+      name: test
+    workspaces:
+      - name: source
+        workspace: source
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: test
+  namespace: ci-tracing-chrometrace
+spec:
+  steps:
+    - name: 64dpes
+      image: ubuntu:20.04
+      script: |
+        #!/usr/bin/env bash
+        cargo test --verbose

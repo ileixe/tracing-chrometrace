@@ -3,7 +3,7 @@
 //!
 //! # Usage
 //! ```rust
-//! use tracing_chromium::ChromeLayer;
+//! use tracing_chrometrace::ChromeLayer;
 //! use tracing_subscriber::{Registry, prelude::*};
 //!
 //! tracing_subscriber::registry().with(ChromeLayer::default()).init();
