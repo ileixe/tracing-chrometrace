@@ -13,7 +13,29 @@ spec:
           body.repository.name in ['tracing-chrometrace']
   bindings:
     - ref: tekton-ci-github-base
+      kind: ClusterTriggerBinding
     - ref: tekton-ci-webhook-pull-request
+      kind: ClusterTriggerBinding
+  template:
+    ref: tracing-chrometrace
+---
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: Trigger
+metadata:
+  name: tracing-chrometrace-push
+  namespace: ci-tracing-chrometrace
+  labels:
+    ci.tekton.dev/trigger-type: github.push
+spec:
+  interceptors:
+    - cel:
+        filter: >-
+          body.repository.name in ['tracing-chrometrace']
+  bindings:
+    - ref: tekton-ci-github-base
+      kind: ClusterTriggerBinding
+    - ref: tekton-ci-webhook-push
+      kind: ClusterTriggerBinding
   template:
     ref: tracing-chrometrace
 ---
@@ -105,9 +127,12 @@ metadata:
   name: test
   namespace: ci-tracing-chrometrace
 spec:
+  workspaces:
+  - name: source
   steps:
-    - name: 64dpes
-      image: ubuntu:20.04
+    - name: test
+      image: rustlang/rust:nightly-bullseye-slim
+      workingDir: $(workspaces.source.path)
       script: |
         #!/usr/bin/env bash
         cargo test --verbose
