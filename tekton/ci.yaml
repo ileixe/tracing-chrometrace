@@ -32,7 +32,7 @@ spec:
     - cel:
         filter: >-
           body.repository.name in ['tracing-chrometrace'] &&
-          body.ref in ['refs/head/staging', 'refs/head/trying']
+          extensions.push_ref in ['staging', 'trying']
   bindings:
     - ref: tekton-ci-github-base
       kind: ClusterTriggerBinding
