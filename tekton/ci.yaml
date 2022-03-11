@@ -130,16 +130,10 @@ spec:
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
-    - name: GITHUB_HOST_URL
-      value: "api.github.com"
-    - name: API_PATH_PREFIX
-      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
-    - name: AUTH_TYPE
-      value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
     - name: GITHUB_TOKEN_SECRET_KEY
@@ -180,16 +174,10 @@ spec:
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
-    - name: GITHUB_HOST_URL
-      value: "api.github.com"
-    - name: API_PATH_PREFIX
-      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
-    - name: AUTH_TYPE
-      value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
     - name: GITHUB_TOKEN_SECRET_KEY
@@ -213,16 +201,10 @@ spec:
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
-    - name: GITHUB_HOST_URL
-      value: "api.github.com"
-    - name: API_PATH_PREFIX
-      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
-    - name: AUTH_TYPE
-      value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
     - name: GITHUB_TOKEN_SECRET_KEY
@@ -246,16 +228,10 @@ spec:
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
-    - name: GITHUB_HOST_URL
-      value: "api.github.com"
-    - name: API_PATH_PREFIX
-      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
-    - name: AUTH_TYPE
-      value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
     - name: GITHUB_TOKEN_SECRET_KEY
