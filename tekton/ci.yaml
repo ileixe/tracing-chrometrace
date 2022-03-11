@@ -32,7 +32,7 @@ spec:
     - cel:
         filter: >-
           body.repository.name in ['tracing-chrometrace'] &&
-          body.pull_request.base.ref in ['main']
+          body.ref in ['refs/head/staging', 'refs/head/trying']
   bindings:
     - ref: tekton-ci-github-base
       kind: ClusterTriggerBinding
@@ -56,6 +56,10 @@ spec:
     description: The git repository that hosts context and Dockerfile
   - name: gitRevision
     description: The git revision to be used.
+  - name: baseRef
+    description: base branch name
+  - name: headRef
+    description: head branch name
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
       kind: PipelineRun
@@ -77,6 +81,10 @@ spec:
             value: "$(tt.params.gitRepository)"
           - name: gitRevision
             value: "$(tt.params.gitRevision)"
+          - name: baseRef
+            value: "$(tt.params.baseRef)"
+          - name: headRef
+            value: "$(tt.params.headRef)"
         workspaces:
           - name: source
             volumeClaimTemplate:
@@ -108,8 +116,10 @@ spec:
     - name: gitRevision
       description: The Git revision to be used.
       default: master
-    - name: pullRequestSenderLogin
-      description: The git pull request sender (to specify who triggered the event)
+    - name: baseRef
+      description: base branch name
+    - name: headRef
+      description: head branch name
   workspaces:
     - name: source
       description: Workspace where the git repo is prepared for testing
@@ -138,10 +148,12 @@ spec:
       value: "bors-chrometrace"
     - name: STATE
       value: pending
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
     when:
-      - input: "$(params.pullRequestSenderLogin)"
+      - input: $(params.baseRef)
         operator: in
-        values: ["bors"]
+        values: ['refs/head/staging', 'refs/head/trying']
   - name: clone
     taskRef:
       name: git-clone
@@ -165,13 +177,6 @@ spec:
   - name: set-status-success
     taskRef:
       name: github-set-status
-    when:
-    - input: $(tasks.status)
-      operator: in
-      values: ["Completed"]
-    - input: "$(params.pullRequestSenderLogin)"
-      operator: in
-      values: ["bors"]
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
@@ -195,16 +200,16 @@ spec:
       value: success
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
-  - name: set-status-failed
-    taskRef:
-      name: github-set-status
     when:
     - input: $(tasks.status)
       operator: in
-      values: ["Failed"]
-    - input: "$(params.pullRequestSenderLogin)"
+      values: ["Completed"]
+    - input: $(params.baseRef)
       operator: in
-      values: ["bors"]
+      values: ['refs/head/staging', 'refs/head/trying']
+  - name: set-status-failed
+    taskRef:
+      name: github-set-status
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
@@ -228,16 +233,16 @@ spec:
       value: failure
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
+    when:
+    - input: $(tasks.status)
+      operator: in
+      values: ["Failed"]
+    - input: $(params.baseRef)
+      operator: in
+      values: ['refs/head/staging', 'refs/head/trying']
   - name: set-status-error
     taskRef:
       name: github-set-status
-    when:
-    - input: $(tasks.status)
-      operator: notin
-      values: ["Succeeded", "Failed"]
-    - input: "$(params.pullRequestSenderLogin)"
-      operator: in
-      values: ["bors"]
     params:
     - name: REPO_FULL_NAME
       value: $(params.owner)/$(params.repo)
@@ -261,6 +266,13 @@ spec:
       value: error
     - name: TARGET_URL
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
+    when:
+    - input: $(tasks.status)
+      operator: notin
+      values: ["Succeeded", "Failed"]
+    - input: $(params.baseRef)
+      operator: in
+      values: ['refs/head/staging', 'refs/head/trying']
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
