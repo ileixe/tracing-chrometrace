@@ -10,7 +10,8 @@ spec:
   interceptors:
     - cel:
         filter: >-
-          body.repository.name in ['tracing-chrometrace']
+          body.repository.name in ['tracing-chrometrace'] &&
+          body.pull_request.base.ref in ['main']
   bindings:
     - ref: tekton-ci-github-base
       kind: ClusterTriggerBinding
@@ -30,7 +31,8 @@ spec:
   interceptors:
     - cel:
         filter: >-
-          body.repository.name in ['tracing-chrometrace']
+          body.repository.name in ['tracing-chrometrace'] &&
+          body.ref in ['refs/heads/staging', 'refs/heads/trying']
   bindings:
     - ref: tekton-ci-github-base
       kind: ClusterTriggerBinding
@@ -120,6 +122,8 @@ spec:
     workspaces:
       - name: source
         workspace: source
+    runAfter:
+    - clone
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
