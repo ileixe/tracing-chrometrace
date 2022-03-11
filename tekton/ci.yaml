@@ -142,6 +142,8 @@ spec:
       value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
     - name: DESCRIPTION
       value: "Build has started"
     - name: CONTEXT
@@ -153,7 +155,7 @@ spec:
     when:
       - input: $(params.baseRef)
         operator: in
-        values: ['refs/head/staging', 'refs/head/trying']
+        values: ['staging', 'trying']
   - name: clone
     taskRef:
       name: git-clone
@@ -192,6 +194,8 @@ spec:
       value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
     - name: DESCRIPTION
       value: "Build has succeeded"
     - name: CONTEXT
@@ -206,7 +210,7 @@ spec:
       values: ["Completed"]
     - input: $(params.baseRef)
       operator: in
-      values: ['refs/head/staging', 'refs/head/trying']
+      values: ['staging', 'trying']
   - name: set-status-failed
     taskRef:
       name: github-set-status
@@ -225,6 +229,8 @@ spec:
       value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
     - name: DESCRIPTION
       value: "Build has failed"
     - name: CONTEXT
@@ -239,7 +245,7 @@ spec:
       values: ["Failed"]
     - input: $(params.baseRef)
       operator: in
-      values: ['refs/head/staging', 'refs/head/trying']
+      values: ['staging', 'trying']
   - name: set-status-error
     taskRef:
       name: github-set-status
@@ -258,6 +264,8 @@ spec:
       value: Basic
     - name: GITHUB_TOKEN_SECRET_NAME
       value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
     - name: DESCRIPTION
       value: "Build has failed"
     - name: CONTEXT
@@ -272,7 +280,7 @@ spec:
       values: ["Succeeded", "Failed"]
     - input: $(params.baseRef)
       operator: in
-      values: ['refs/head/staging', 'refs/head/trying']
+      values: ['staging', 'trying']
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
