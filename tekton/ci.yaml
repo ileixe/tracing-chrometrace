@@ -32,7 +32,7 @@ spec:
     - cel:
         filter: >-
           body.repository.name in ['tracing-chrometrace'] &&
-          body.ref in ['refs/heads/staging', 'refs/heads/trying']
+          body.pull_request.base.ref in ['main']
   bindings:
     - ref: tekton-ci-github-base
       kind: ClusterTriggerBinding
@@ -56,8 +56,6 @@ spec:
     description: The git repository that hosts context and Dockerfile
   - name: gitRevision
     description: The git revision to be used.
-  - name: pullRequestSenderLogin
-    description: The git pull request sender (to specify who triggered the event)
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
       kind: PipelineRun
@@ -79,8 +77,6 @@ spec:
             value: "$(tt.params.gitRepository)"
           - name: gitRevision
             value: "$(tt.params.gitRevision)"
-          - name: pullRequestSenderLogin
-            value: "$(tt.params.pullRequestSenderLogin)"
         workspaces:
           - name: source
             volumeClaimTemplate:
@@ -172,7 +168,7 @@ spec:
     when:
     - input: $(tasks.status)
       operator: in
-      values: ["Succeeded"]
+      values: ["Completed"]
     - input: "$(params.pullRequestSenderLogin)"
       operator: in
       values: ["bors"]
@@ -234,7 +230,7 @@ spec:
       value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
   - name: set-status-error
     taskRef:
-      name: github-set-status-error
+      name: github-set-status
     when:
     - input: $(tasks.status)
       operator: notin
