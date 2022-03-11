@@ -133,7 +133,7 @@ spec:
     - name: GITHUB_HOST_URL
       value: "api.github.com"
     - name: API_PATH_PREFIX
-      value: "/api/v3"
+      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
@@ -150,8 +150,6 @@ spec:
       value: "bors-chrometrace"
     - name: STATE
       value: pending
-    - name: TARGET_URL
-      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
     when:
       - input: $(params.baseRef)
         operator: in
@@ -185,7 +183,7 @@ spec:
     - name: GITHUB_HOST_URL
       value: "api.github.com"
     - name: API_PATH_PREFIX
-      value: "/api/v3"
+      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
@@ -202,8 +200,6 @@ spec:
       value: "bors-chrometrace"
     - name: STATE
       value: success
-    - name: TARGET_URL
-      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
     when:
     - input: $(tasks.status)
       operator: in
@@ -220,7 +216,7 @@ spec:
     - name: GITHUB_HOST_URL
       value: "api.github.com"
     - name: API_PATH_PREFIX
-      value: "/api/v3"
+      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
@@ -237,8 +233,6 @@ spec:
       value: "bors-chrometrace"
     - name: STATE
       value: failure
-    - name: TARGET_URL
-      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
     when:
     - input: $(tasks.status)
       operator: in
@@ -255,7 +249,7 @@ spec:
     - name: GITHUB_HOST_URL
       value: "api.github.com"
     - name: API_PATH_PREFIX
-      value: "/api/v3"
+      value: ""
     - name: SHA
       value: $(params.gitRevision)
     - name: TARGET_URL
@@ -272,8 +266,6 @@ spec:
       value: "bors-chrometrace"
     - name: STATE
       value: error
-    - name: TARGET_URL
-      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/
     when:
     - input: $(tasks.status)
       operator: notin
