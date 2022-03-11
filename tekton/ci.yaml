@@ -32,7 +32,7 @@ spec:
     - cel:
         filter: >-
           body.repository.name in ['tracing-chrometrace'] &&
-          body.ref in ['refs/heads/staging', 'refs/heads/trying']
+          extensions.pushRef in ['staging', 'trying']
   bindings:
     - ref: tekton-ci-github-base
       kind: ClusterTriggerBinding
@@ -56,6 +56,10 @@ spec:
     description: The git repository that hosts context and Dockerfile
   - name: gitRevision
     description: The git revision to be used.
+  - name: baseRef
+    description: base branch name
+  - name: headRef
+    description: head branch name
   resourcetemplates:
     - apiVersion: tekton.dev/v1beta1
       kind: PipelineRun
@@ -69,10 +73,18 @@ spec:
           github.integrations.tekton.dev/commit: "$(tt.params.gitRevision)"
       spec:
         params:
+          - name: owner
+            value: "$(tt.params.owner)"
+          - name: repo
+            value: "$(tt.params.repo)"
           - name: gitRepository
             value: "$(tt.params.gitRepository)"
           - name: gitRevision
             value: "$(tt.params.gitRevision)"
+          - name: baseRef
+            value: "$(tt.params.baseRef)"
+          - name: headRef
+            value: "$(tt.params.headRef)"
         workspaces:
           - name: source
             volumeClaimTemplate:
@@ -95,15 +107,47 @@ metadata:
       Run integration tests against tracing-chrometrace
 spec:
   params:
+    - name: owner
+      description: The git repository owner
+    - name: repo
+      description: The git repository name
     - name: gitRepository
       description: The git repository that hosts context and Dockerfile
     - name: gitRevision
       description: The Git revision to be used.
       default: master
+    - name: baseRef
+      description: base branch name
+    - name: headRef
+      description: head branch name
   workspaces:
     - name: source
       description: Workspace where the git repo is prepared for testing
   tasks:
+  - name: set-status-begin
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.owner)/$(params.repo)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "Build has started"
+    - name: CONTEXT
+      value: "bors-chrometrace"
+    - name: STATE
+      value: pending
+    when:
+      - input: $(params.baseRef)
+        operator: in
+        values: ['staging', 'trying']
   - name: clone
     taskRef:
       name: git-clone
@@ -115,7 +159,6 @@ spec:
       value: $(params.gitRepository)
     - name: revision
       value: $(params.gitRevision)
-
   - name: test
     taskRef:
       name: test
@@ -124,6 +167,88 @@ spec:
         workspace: source
     runAfter:
     - clone
+  finally:
+  - name: set-status-success
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.owner)/$(params.repo)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "Build has succeeded"
+    - name: CONTEXT
+      value: "bors-chrometrace"
+    - name: STATE
+      value: success
+    when:
+    - input: $(tasks.status)
+      operator: in
+      values: ["Completed"]
+    - input: $(params.baseRef)
+      operator: in
+      values: ['staging', 'trying']
+  - name: set-status-failed
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.owner)/$(params.repo)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "Build has failed"
+    - name: CONTEXT
+      value: "bors-chrometrace"
+    - name: STATE
+      value: failure
+    when:
+    - input: $(tasks.status)
+      operator: in
+      values: ["Failed"]
+    - input: $(params.baseRef)
+      operator: in
+      values: ['staging', 'trying']
+  - name: set-status-error
+    taskRef:
+      name: github-set-status
+    params:
+    - name: REPO_FULL_NAME
+      value: $(params.owner)/$(params.repo)
+    - name: SHA
+      value: $(params.gitRevision)
+    - name: TARGET_URL
+      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
+    - name: GITHUB_TOKEN_SECRET_NAME
+      value: "github-credential"
+    - name: GITHUB_TOKEN_SECRET_KEY
+      value: "password"
+    - name: DESCRIPTION
+      value: "Build has failed"
+    - name: CONTEXT
+      value: "bors-chrometrace"
+    - name: STATE
+      value: error
+    when:
+    - input: $(tasks.status)
+      operator: notin
+      values: ["Succeeded", "Failed"]
+    - input: $(params.baseRef)
+      operator: in
+      values: ['staging', 'trying']
 ---
 apiVersion: tekton.dev/v1beta1
 kind: Task
