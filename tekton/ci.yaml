@@ -190,8 +190,8 @@ spec:
       value: success
     when:
     - input: $(tasks.status)
-      operator: in
-      values: ["Completed"]
+      operator: notin
+      values: ["Failed"]
     - input: $(params.baseRef)
       operator: in
       values: ['staging', 'trying']
@@ -219,33 +219,6 @@ spec:
     - input: $(tasks.status)
       operator: in
       values: ["Failed"]
-    - input: $(params.baseRef)
-      operator: in
-      values: ['staging', 'trying']
-  - name: set-status-error
-    taskRef:
-      name: github-set-status
-    params:
-    - name: REPO_FULL_NAME
-      value: $(params.owner)/$(params.repo)
-    - name: SHA
-      value: $(params.gitRevision)
-    - name: TARGET_URL
-      value: https://tekton.office.furiosa.in/#/namespaces/ci-tracing-chrometrace/pipelineruns/$(context.pipelineRun.name)
-    - name: GITHUB_TOKEN_SECRET_NAME
-      value: "github-credential"
-    - name: GITHUB_TOKEN_SECRET_KEY
-      value: "password"
-    - name: DESCRIPTION
-      value: "Build has failed"
-    - name: CONTEXT
-      value: "bors-chrometrace"
-    - name: STATE
-      value: error
-    when:
-    - input: $(tasks.status)
-      operator: notin
-      values: ["Succeeded", "Failed"]
     - input: $(params.baseRef)
       operator: in
       values: ['staging', 'trying']
