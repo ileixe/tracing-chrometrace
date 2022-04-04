@@ -10,21 +10,25 @@
 //! ```
 
 #![feature(thread_id_value)]
+#![feature(derive_default_enum)]
+
+use derive_builder::Builder;
 
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::str::FromStr;
-use std::{collections::HashMap, io, process, thread, time::Instant};
+use std::{collections::HashMap, io, time::Instant};
 use strum_macros::EnumString;
 use tracing::Subscriber;
 use tracing::{span, Event};
 use tracing_subscriber::{fmt::MakeWriter, layer::Context, registry::LookupSpan, Layer};
 
-#[derive(Debug, EnumString)]
+#[derive(Debug, Clone, Default, EnumString)]
 pub enum EventType {
     DurationBegin,
     DurationEnd,
     Complete,
+    #[default]
     Instant,
     Counter,
     AsyncStart,
@@ -80,67 +84,40 @@ impl Serialize for EventType {
     }
 }
 
-#[derive(Serialize, Debug)]
-struct EventDescription {
-    name: String,
-    cat: String,
-    ph: EventType,
-    ts: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dur: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tts: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<String>,
-    pid: u64,
-    tid: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    args: Option<HashMap<String, String>>,
+#[derive(Serialize, Builder)]
+#[builder(custom_constructor)]
+pub struct ChromeEvent {
+    #[builder(setter(custom))]
+    #[serde(skip)]
+    #[allow(dead_code)]
+    start: Instant,
+    #[builder(default = "\"DefaultEventName\".into()")]
+    pub name: String,
+    #[builder(default = "\"DefaultCategory\".into()")]
+    pub cat: String,
+    #[builder(default)]
+    pub ph: EventType,
+    #[builder(default = "Instant::now().elapsed().as_nanos() as f64 / 1000.0")]
+    pub ts: f64,
+    #[builder(default)]
+    pub dur: Option<f64>,
+    #[builder(default)]
+    pub tts: Option<f64>,
+    #[builder(default)]
+    pub id: Option<String>,
+    #[builder(default = "std::process::id().into()")]
+    pub pid: u64,
+    #[builder(default = "std::thread::current().id().as_u64().into()")]
+    pub tid: u64,
+    #[builder(default, setter(each = "arg"))]
+    pub args: HashMap<String, String>,
 }
 
-impl EventDescription {
-    fn new(start: Instant, event_type: EventType, mut fields: HashMap<String, String>) -> Self {
-        let name = fields
-            .remove("name")
-            .unwrap_or("DefaultEventName".to_string());
-
-        let cat = fields
-            .remove("cat")
-            .unwrap_or("DefaultCategory".to_string());
-
-        let ts = fields
-            .remove("ts")
-            .map_or(start.elapsed().as_nanos() as f64 / 1000., |x| {
-                x.trim_matches('"').parse().unwrap()
-            });
-
-        let dur = fields
-            .remove("dur")
-            .map_or(None, |x| Some(x.trim_matches('"').parse().unwrap()));
-
-        let id = fields.remove("id");
-
-        let pid = fields.remove("pid").map_or(process::id() as u64, |x| {
-            x.trim_matches('"').parse().unwrap()
-        });
-
-        let tid = fields
-            .remove("tid")
-            .map_or(thread::current().id().as_u64().get(), |x| {
-                x.trim_matches('"').parse().unwrap()
-            });
-
-        EventDescription {
-            name,
-            cat,
-            ph: event_type,
-            dur,
-            ts,
-            tts: None, // Not yet supported
-            id,
-            pid,
-            tid,
-            args: if fields.len() > 0 { Some(fields) } else { None },
+impl ChromeEvent {
+    pub fn builder(start: Instant) -> ChromeEventBuilder {
+        ChromeEventBuilder {
+            start: Some(start),
+            ..ChromeEventBuilder::create_empty()
         }
     }
 }
@@ -172,7 +149,6 @@ impl<S, W> ChromeLayer<S, W> {
         // Add dummy empty entry to make valid JSON
         io::Write::write_all(&mut writer, b"[{}\n").unwrap();
         drop(writer);
-
         ChromeLayer {
             start: Instant::now(),
             make_writer,
@@ -180,24 +156,58 @@ impl<S, W> ChromeLayer<S, W> {
         }
     }
 
-    fn write(&self, writer: &mut dyn io::Write, description: &EventDescription) -> io::Result<()> {
-        io::Write::write_all(
-            writer,
-            (",".to_owned() + &serde_json::to_string(description).unwrap() + "\n").as_bytes(),
-        )
+    fn write(&self, writer: &mut dyn io::Write, event: ChromeEvent) -> io::Result<()> {
+        // For faster String concat: https://users.rust-lang.org/t/fast-string-concatenation/4425/3
+        let event = serde_json::to_string(&event).unwrap();
+        let mut buf = String::with_capacity(1 + event.len() + 1 + 1);
+        buf.push(',');
+        buf.push_str(&event);
+        buf.push('\n');
+
+        io::Write::write_all(writer, buf.as_bytes())
     }
 }
 
-struct Fields {
-    inner: HashMap<String, String>,
-}
-
-impl<'a> tracing_subscriber::field::Visit for Fields {
+impl<'a> tracing_subscriber::field::Visit for ChromeEventBuilder {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        self.inner
-            .insert(field.name().to_string(), format!("{:?}", value));
+        let value = format!("{:?}", value);
+
+        match field.name() {
+            "name" => {
+                self.name(value);
+            }
+            "cat" => {
+                self.cat(value);
+            }
+            "ph" => {
+                self.ph(EventType::from_str(&value).expect("Invalid EventType"));
+            }
+            "ts" => {
+                self.ts(value.parse().expect("Invalid timestamp"));
+            }
+            "dur" => {
+                self.dur(Some(value.parse().expect("Invalid timestamp")));
+            }
+            "tts" => {
+                self.tts(Some(value.parse().expect("Invalid timestamp")));
+            }
+            "id" => {
+                self.id(Some(value));
+            }
+            "pid" => {
+                self.pid(value.parse().unwrap());
+            }
+            "tid" => {
+                self.tid(value.parse().unwrap());
+            }
+            arg => {
+                self.arg((arg.into(), value));
+            }
+        }
     }
 }
+
+struct AsyncEntered(bool);
 
 impl<S, W> Layer<S> for ChromeLayer<S, W>
 where
@@ -207,34 +217,25 @@ where
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
 
-        let mut visitor = Fields {
-            inner: HashMap::new(),
-        };
-        attrs.record(&mut visitor);
+        let mut builder = ChromeEvent::builder(self.start);
+        attrs.record(&mut builder);
 
-        span.extensions_mut().insert(visitor);
+        span.extensions_mut().insert(builder);
     }
 
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let mut fields = Fields {
-            inner: HashMap::new(),
-        };
-        event.record(&mut fields);
+        let mut builder = ChromeEvent::builder(self.start);
 
-        let event_type = fields
-            .inner
-            .remove("event")
-            .map_or(EventType::Instant, |e| {
-                EventType::from_str(&e.trim_matches('"'))
-                    .expect(format!("EventType expected, not {:?}", e).as_str())
-            });
+        // Default event type
+        builder.ph(EventType::Instant);
 
-        let description = EventDescription::new(self.start, event_type, fields.inner);
+        event.record(&mut builder);
 
-        let mut writer = self.make_writer.make_writer();
-
-        self.write(&mut writer, &description)
-            .expect("Failed to write event in tracing-chrometrace");
+        self.write(
+            &mut self.make_writer.make_writer(),
+            builder.build().unwrap(),
+        )
+        .expect("Failed to write event in tracing-chrometrace");
     }
 
     fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
@@ -242,29 +243,22 @@ where
 
         let mut extensions = span.extensions_mut();
 
-        if extensions.get_mut::<bool>().is_some() {
+        if extensions.get_mut::<AsyncEntered>().is_some() {
             // If recoding of the span is already started (async case), skip it
             return;
         } else {
-            extensions.insert(true);
+            extensions.insert(AsyncEntered(true));
         }
 
-        if let Some(fields) = extensions.get_mut::<Fields>() {
-            let mut fields = fields.inner.clone();
+        if let Some(builder) = extensions.get_mut::<ChromeEventBuilder>() {
+            builder.ph(EventType::DurationBegin);
 
-            let event_type = fields
-                .remove("event")
-                .map_or(EventType::DurationBegin, |e| {
-                    EventType::from_str(&e.trim_matches('"'))
-                        .expect(format!("EventType expected, not {:?}", e).as_str())
-                });
-
-            let description = EventDescription::new(self.start, event_type, fields);
-
-            let mut writer = self.make_writer.make_writer();
-            self.write(&mut writer, &description)
-                .expect("Failed to write event in tracing-chrometrace");
-        };
+            self.write(
+                &mut self.make_writer.make_writer(),
+                builder.build().unwrap(),
+            )
+            .expect("Failed to write event in tracing-chrometrace");
+        }
     }
 
     fn on_exit(&self, _id: &span::Id, _ctx: Context<'_, S>) {}
@@ -272,19 +266,16 @@ where
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(&id).expect("Span not found, this is a bug");
 
-        if let Some(fields) = span.extensions().get::<Fields>() {
-            let mut fields = fields.inner.clone();
+        let mut extensions = span.extensions_mut();
 
-            let event_type = fields.remove("event").map_or(EventType::DurationEnd, |e| {
-                EventType::from_str(&e.trim_matches('"'))
-                    .expect(format!("EventType expected, not {:?}", e).as_str())
-            });
+        if let Some(builder) = extensions.get_mut::<ChromeEventBuilder>() {
+            builder.ph(EventType::DurationEnd);
 
-            let description = EventDescription::new(self.start, event_type, fields);
-
-            let mut writer = self.make_writer.make_writer();
-            self.write(&mut writer, &description)
-                .expect("Failed to write event in tracing-chrometrace");
-        };
+            self.write(
+                &mut self.make_writer.make_writer(),
+                builder.build().unwrap(),
+            )
+            .expect("Failed to write event in tracing-chrometrace");
+        }
     }
 }

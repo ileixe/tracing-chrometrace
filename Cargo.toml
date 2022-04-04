@@ -1,6 +1,6 @@
 [package]
 name = "tracing-chrometrace"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2018"
 
 authors = ["Youseok Yang <ileixe@gmail.com>"]
@@ -13,9 +13,10 @@ readme = "README.md"
 repository = "https://github.com/ileixe/tracing-chrometrace"
 
 [dependencies]
+derive_builder = "0.11.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = { version = "0.22", features = ["derive"] }
 strum_macros = "0.22"
-tracing = "0.1.29"
-tracing-subscriber = { version = "0.3", features = ["fmt", "std", "env-filter"] }
+tracing = "0.1.32"
+tracing-subscriber = { version = "0.3.9", features = ["fmt", "std", "env-filter"] }
