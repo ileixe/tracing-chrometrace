@@ -15,15 +15,17 @@
 use derive_builder::Builder;
 
 use serde::Serialize;
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
 use std::{collections::HashMap, io, time::Instant};
+use strum::AsRefStr;
 use strum_macros::EnumString;
 use tracing::Subscriber;
 use tracing::{span, Event};
 use tracing_subscriber::{fmt::MakeWriter, layer::Context, registry::LookupSpan, Layer};
 
-#[derive(Debug, Clone, Default, EnumString)]
+#[derive(Debug, Clone, Default, EnumString, AsRefStr)]
 pub enum EventType {
     DurationBegin,
     DurationEnd,
@@ -84,17 +86,18 @@ impl Serialize for EventType {
     }
 }
 
-#[derive(Serialize, Builder)]
+#[derive(Serialize, Builder, Debug)]
 #[builder(custom_constructor)]
+#[builder(derive(Debug))]
 pub struct ChromeEvent {
     #[builder(setter(custom))]
     #[serde(skip)]
-    #[allow(dead_code)]
+    #[allow(unused)]
     start: Instant,
-    #[builder(default = "\"DefaultEventName\".into()")]
-    pub name: String,
-    #[builder(default = "\"DefaultCategory\".into()")]
-    pub cat: String,
+    #[builder(setter(into))]
+    pub name: Cow<'static, str>,
+    #[builder(setter(into))]
+    pub cat: Cow<'static, str>,
     #[builder(default)]
     pub ph: EventType,
     #[builder(default = "Instant::now().elapsed().as_nanos() as f64 / 1000.0")]
@@ -104,13 +107,16 @@ pub struct ChromeEvent {
     #[builder(default)]
     pub tts: Option<f64>,
     #[builder(default)]
-    pub id: Option<String>,
+    #[builder(setter(into))]
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub id: Cow<'static, str>,
     #[builder(default = "std::process::id().into()")]
     pub pid: u64,
     #[builder(default = "std::thread::current().id().as_u64().into()")]
     pub tid: u64,
     #[builder(default, setter(each = "arg"))]
-    pub args: HashMap<String, String>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub args: HashMap<&'static str, String>,
 }
 
 impl ChromeEvent {
@@ -180,7 +186,8 @@ impl<'a> tracing_subscriber::field::Visit for ChromeEventBuilder {
                 self.cat(value);
             }
             "ph" => {
-                self.ph(EventType::from_str(&value).expect("Invalid EventType"));
+                self.ph(EventType::from_str(value.trim_matches('"'))
+                    .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
             }
             "ts" => {
                 self.ts(value.parse().expect("Invalid timestamp"));
@@ -192,7 +199,7 @@ impl<'a> tracing_subscriber::field::Visit for ChromeEventBuilder {
                 self.tts(Some(value.parse().expect("Invalid timestamp")));
             }
             "id" => {
-                self.id(Some(value));
+                self.id(value);
             }
             "pid" => {
                 self.pid(value.parse().unwrap());
@@ -201,7 +208,7 @@ impl<'a> tracing_subscriber::field::Visit for ChromeEventBuilder {
                 self.tid(value.parse().unwrap());
             }
             arg => {
-                self.arg((arg.into(), value));
+                self.arg((arg, value));
             }
         }
     }
@@ -277,5 +284,16 @@ where
             )
             .expect("Failed to write event in tracing-chrometrace");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_stringify() {
+        let event = EventType::from_str("DurationBegin").unwrap();
+        matches!(event, EventType::DurationBegin);
     }
 }
