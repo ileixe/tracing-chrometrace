@@ -9,8 +9,8 @@
 //! tracing_subscriber::registry().with(ChromeLayer::default()).init();
 //! ```
 
-#![feature(thread_id_value)]
 #![feature(derive_default_enum)]
+#![feature(thread_id_value)]
 
 use derive_builder::Builder;
 
@@ -100,10 +100,14 @@ pub struct ChromeEvent {
     pub cat: Cow<'static, str>,
     #[builder(default)]
     pub ph: EventType,
-    #[builder(default = "Instant::now().elapsed().as_nanos() as f64 / 1000.0")]
+    #[builder(
+        default = "Instant::now().duration_since(self.start.unwrap()).as_nanos() as f64 / 1000.0"
+    )]
     pub ts: f64,
     #[builder(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dur: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[builder(default)]
     pub tts: Option<f64>,
     #[builder(default)]
@@ -120,7 +124,7 @@ pub struct ChromeEvent {
 }
 
 impl ChromeEvent {
-    pub fn builder(start: Instant) -> ChromeEventBuilder {
+    fn builder(start: Instant) -> ChromeEventBuilder {
         ChromeEventBuilder {
             start: Some(start),
             ..ChromeEventBuilder::create_empty()
@@ -174,41 +178,60 @@ impl<S, W> ChromeLayer<S, W> {
     }
 }
 
-impl<'a> tracing_subscriber::field::Visit for ChromeEventBuilder {
+struct ChromeEventVisitor {
+    builder: ChromeEventBuilder,
+    event: Option<String>,
+}
+
+impl<'a> tracing_subscriber::field::Visit for ChromeEventVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         let value = format!("{:?}", value);
+        let name = field.name();
 
-        match field.name() {
+        match name {
             "name" => {
-                self.name(value);
+                self.builder.name(value);
             }
             "cat" => {
-                self.cat(value);
-            }
-            "ph" => {
-                self.ph(EventType::from_str(value.trim_matches('"'))
-                    .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
-            }
-            "ts" => {
-                self.ts(value.parse().expect("Invalid timestamp"));
-            }
-            "dur" => {
-                self.dur(Some(value.parse().expect("Invalid timestamp")));
-            }
-            "tts" => {
-                self.tts(Some(value.parse().expect("Invalid timestamp")));
+                self.builder.cat(value);
             }
             "id" => {
-                self.id(value);
+                self.builder.id(value);
             }
-            "pid" => {
-                self.pid(value.parse().unwrap());
-            }
-            "tid" => {
-                self.tid(value.parse().unwrap());
+            "ph" | "ts" | "dur" | "tts" | "pid" | "tid" | "event" => {
+                let value = value.trim_matches('"');
+
+                match name {
+                    "ph" => {
+                        self.builder.ph(EventType::from_str(value)
+                            .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
+                    }
+                    "ts" => {
+                        self.builder.ts(value.parse().expect("Invalid timestamp"));
+                    }
+                    "dur" => {
+                        self.builder
+                            .dur(Some(value.parse().expect("Invalid timestamp")));
+                    }
+                    "tts" => {
+                        self.builder
+                            .tts(Some(value.parse().expect("Invalid timestamp")));
+                    }
+                    "pid" => {
+                        self.builder.pid(value.parse().unwrap());
+                    }
+                    "tid" => {
+                        self.builder.tid(value.parse().unwrap());
+                    }
+                    // Special keyword to annotate event type
+                    "event" => {
+                        self.event = Some(value.to_string());
+                    }
+                    _ => unreachable!(),
+                }
             }
             arg => {
-                self.arg((arg, value));
+                self.builder.arg((arg, value));
             }
         }
     }
@@ -224,23 +247,29 @@ where
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
 
-        let mut builder = ChromeEvent::builder(self.start);
-        attrs.record(&mut builder);
+        let mut visitor = ChromeEventVisitor {
+            builder: ChromeEvent::builder(self.start),
+            event: None,
+        };
+        attrs.record(&mut visitor);
 
-        span.extensions_mut().insert(builder);
+        span.extensions_mut().insert(visitor);
     }
 
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let mut builder = ChromeEvent::builder(self.start);
+        let mut visitor = ChromeEventVisitor {
+            builder: ChromeEvent::builder(self.start),
+            event: None,
+        };
 
         // Default event type
-        builder.ph(EventType::Instant);
+        visitor.builder.ph(EventType::Instant);
 
-        event.record(&mut builder);
+        event.record(&mut visitor);
 
         self.write(
             &mut self.make_writer.make_writer(),
-            builder.build().unwrap(),
+            visitor.builder.build().unwrap(),
         )
         .expect("Failed to write event in tracing-chrometrace");
     }
@@ -257,12 +286,22 @@ where
             extensions.insert(AsyncEntered(true));
         }
 
-        if let Some(builder) = extensions.get_mut::<ChromeEventBuilder>() {
-            builder.ph(EventType::DurationBegin);
+        if let Some(visitor) = extensions.get_mut::<ChromeEventVisitor>() {
+            // Only "async" event suppported now
+            if visitor
+                .event
+                .as_ref()
+                .map(|event| event == "async")
+                .unwrap_or(false)
+            {
+                visitor.builder.ph(EventType::AsyncStart);
+            } else {
+                visitor.builder.ph(EventType::DurationBegin);
+            }
 
             self.write(
                 &mut self.make_writer.make_writer(),
-                builder.build().unwrap(),
+                visitor.builder.build().unwrap(),
             )
             .expect("Failed to write event in tracing-chrometrace");
         }
@@ -275,12 +314,21 @@ where
 
         let mut extensions = span.extensions_mut();
 
-        if let Some(builder) = extensions.get_mut::<ChromeEventBuilder>() {
-            builder.ph(EventType::DurationEnd);
+        if let Some(visitor) = extensions.get_mut::<ChromeEventVisitor>() {
+            if visitor
+                .event
+                .as_ref()
+                .map(|event| event == "async")
+                .unwrap_or(false)
+            {
+                visitor.builder.ph(EventType::AsyncEnd);
+            } else {
+                visitor.builder.ph(EventType::DurationEnd);
+            }
 
             self.write(
                 &mut self.make_writer.make_writer(),
-                builder.build().unwrap(),
+                visitor.builder.build().unwrap(),
             )
             .expect("Failed to write event in tracing-chrometrace");
         }
