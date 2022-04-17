@@ -94,8 +94,10 @@ pub struct ChromeEvent {
     #[serde(skip)]
     #[allow(unused)]
     start: Instant,
+    #[builder(default)]
     #[builder(setter(into))]
     pub name: Cow<'static, str>,
+    #[builder(default)]
     #[builder(setter(into))]
     pub cat: Cow<'static, str>,
     #[builder(default)]
