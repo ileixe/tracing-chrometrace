@@ -12,87 +12,79 @@
 #![feature(derive_default_enum)]
 #![feature(thread_id_value)]
 
-use derive_builder::Builder;
-
-use serde::Serialize;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
 use std::{collections::HashMap, io, time::Instant};
+
+use derivative::Derivative;
+use derive_builder::Builder;
+use serde::{Deserialize, Serialize};
 use strum::AsRefStr;
 use strum_macros::EnumString;
 use tracing::Subscriber;
 use tracing::{span, Event};
 use tracing_subscriber::{fmt::MakeWriter, layer::Context, registry::LookupSpan, Layer};
 
-#[derive(Debug, Clone, Default, EnumString, AsRefStr)]
+#[derive(Debug, Clone, Default, EnumString, AsRefStr, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
+    #[serde(rename = "X")]
     DurationBegin,
+    #[serde(rename = "E")]
     DurationEnd,
+    #[serde(rename = "X")]
     Complete,
     #[default]
+    #[serde(rename = "i")]
     Instant,
+    #[serde(rename = "C")]
     Counter,
+    #[serde(rename = "b")]
     AsyncStart,
+    #[serde(rename = "n")]
     AsyncInstant,
+    #[serde(rename = "e")]
     AsyncEnd,
+    #[serde(rename = "s")]
     FlowStart,
+    #[serde(rename = "t")]
     FlowStep,
+    #[serde(rename = "f")]
     FlowEnd,
+    #[serde(rename = "p")]
     Sample,
+    #[serde(rename = "N")]
     ObjectCreated,
+    #[serde(rename = "O")]
     ObjectSnapshot,
+    #[serde(rename = "D")]
     ObjectDestroyed,
+    #[serde(rename = "M")]
     Metadata,
+    #[serde(rename = "V")]
     MemoryDumpGlobal,
+    #[serde(rename = "v")]
     MemoryDumpProcess,
+    #[serde(rename = "R")]
     Mark,
+    #[serde(rename = "c")]
     ClockSync,
+    #[serde(rename = "(")]
     ContextBegin,
+    #[serde(rename = ")")]
     ContextEnd,
 }
 
-impl Serialize for EventType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let event = match *self {
-            EventType::DurationBegin => "B",
-            EventType::DurationEnd => "E",
-            EventType::Complete => "X",
-            EventType::Instant => "i",
-            EventType::Counter => "C",
-            EventType::AsyncStart => "b",
-            EventType::AsyncInstant => "n",
-            EventType::AsyncEnd => "e",
-            EventType::FlowStart => "s",
-            EventType::FlowStep => "t",
-            EventType::FlowEnd => "f",
-            EventType::Sample => "P",
-            EventType::ObjectCreated => "N",
-            EventType::ObjectSnapshot => "O",
-            EventType::ObjectDestroyed => "D",
-            EventType::Metadata => "M",
-            EventType::MemoryDumpGlobal => "V",
-            EventType::MemoryDumpProcess => "v",
-            EventType::Mark => "R",
-            EventType::ClockSync => "c",
-            EventType::ContextBegin => "(",
-            EventType::ContextEnd => ")",
-        };
-
-        serializer.serialize_str(event)
-    }
-}
-
-#[derive(Serialize, Builder, Debug)]
+#[derive(Derivative, Serialize, Deserialize, Builder, Debug)]
+#[derivative(PartialEq)]
 #[builder(custom_constructor)]
 #[builder(derive(Debug))]
 pub struct ChromeEvent {
     #[builder(setter(custom))]
+    #[serde(default = "Instant::now")]
     #[serde(skip)]
     #[allow(unused)]
+    #[derivative(PartialEq = "ignore")]
     start: Instant,
     #[builder(default)]
     #[builder(setter(into))]
@@ -122,11 +114,11 @@ pub struct ChromeEvent {
     pub tid: u64,
     #[builder(default, setter(each = "arg"))]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub args: HashMap<&'static str, String>,
+    pub args: HashMap<String, String>,
 }
 
 impl ChromeEvent {
-    fn builder(start: Instant) -> ChromeEventBuilder {
+    pub fn builder(start: Instant) -> ChromeEventBuilder {
         ChromeEventBuilder {
             start: Some(start),
             ..ChromeEventBuilder::create_empty()
@@ -211,7 +203,7 @@ where
 {
     fn new(make_writer: W) -> Self {
         // Write JSON opening parenthesis
-        io::Write::write_all(&mut make_writer.clone().make_writer(), b"[{}\n").unwrap();
+        io::Write::write_all(&mut make_writer.make_writer(), b"[{}\n").unwrap();
 
         Self { make_writer }
     }
@@ -304,7 +296,7 @@ impl<'a> tracing_subscriber::field::Visit for ChromeEventVisitor {
                 }
             }
             arg => {
-                self.builder.arg((arg, value));
+                self.builder.arg((arg.to_string(), value));
             }
         }
     }

@@ -227,6 +227,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derive_builder"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -737,10 +748,11 @@ dependencies = [
 
 [[package]]
 name = "tracing-chrometrace"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "criterion",
  "crossbeam-queue",
+ "derivative",
  "derive_builder",
  "serde",
  "serde_json",
