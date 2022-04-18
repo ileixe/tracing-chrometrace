@@ -151,16 +151,87 @@ impl<S> Default for ChromeLayer<S> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ChromeWriter<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    make_writer: W,
+}
+
+impl<W> ChromeWriter<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    pub fn with(make_writer: W) -> (Self, ChromeWriterGuard<W>) {
+        (
+            Self {
+                make_writer: make_writer.clone(),
+            },
+            ChromeWriterGuard::new(make_writer),
+        )
+    }
+}
+
+impl<W> io::Write for ChromeWriter<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut writer = self.make_writer.make_writer();
+        io::Write::write(&mut writer, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a, W> MakeWriter<'a> for ChromeWriter<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    type Writer = ChromeWriter<W>;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+pub struct ChromeWriterGuard<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    make_writer: W,
+}
+
+impl<W> ChromeWriterGuard<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    fn new(make_writer: W) -> Self {
+        // Write JSON opening parenthesis
+        io::Write::write_all(&mut make_writer.clone().make_writer(), b"[{}\n").unwrap();
+
+        Self { make_writer }
+    }
+}
+
+impl<W> Drop for ChromeWriterGuard<W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    fn drop(&mut self) {
+        // Write JSON closing parenthesis
+        io::Write::write_all(&mut self.make_writer.make_writer(), b"]").unwrap();
+    }
+}
+
 impl<S, W> ChromeLayer<S, W> {
     pub fn with_writer<W2>(self, make_writer: W2) -> ChromeLayer<S, W2>
     where
         W2: for<'writer> MakeWriter<'writer> + 'static,
     {
-        // TODO: Any other way to make a valid JSON array? Note that we even don't have close parenthesis.
-        let mut writer = make_writer.make_writer();
-        // Add dummy empty entry to make valid JSON
-        io::Write::write_all(&mut writer, b"[{}\n").unwrap();
-        drop(writer);
         ChromeLayer {
             start: Instant::now(),
             make_writer,
