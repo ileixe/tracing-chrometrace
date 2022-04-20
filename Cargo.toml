@@ -1,6 +1,6 @@
 [package]
 name = "tracing-chrometrace"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2018"
 
 authors = ["Youseok Yang <ileixe@gmail.com>"]
@@ -13,6 +13,7 @@ readme = "README.md"
 repository = "https://github.com/ileixe/tracing-chrometrace"
 
 [dependencies]
+crossbeam-queue = "0.3.5"
 derivative = "2.2.0"
 derive_builder = "0.11.1"
 serde = { version = "1.0", features = ["derive"] }

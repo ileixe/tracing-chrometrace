@@ -6,7 +6,8 @@
 //! use tracing_chrometrace::ChromeLayer;
 //! use tracing_subscriber::{Registry, prelude::*};
 //!
-//! tracing_subscriber::registry().with(ChromeLayer::default()).init();
+//! let (writer, guard) = ChromeLayer::with_writer(std::io::stdout);
+//! tracing_subscriber::registry().with(writer).init();
 //! ```
 
 #![feature(derive_default_enum)]
@@ -15,8 +16,10 @@
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{collections::HashMap, io, time::Instant};
 
+use crossbeam_queue::ArrayQueue;
 use derivative::Derivative;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
@@ -106,14 +109,14 @@ pub struct ChromeEvent {
     pub tts: Option<f64>,
     #[builder(default)]
     #[builder(setter(into))]
-    #[serde(skip_serializing_if = "str::is_empty")]
+    #[serde(default, skip_serializing_if = "str::is_empty")]
     pub id: Cow<'static, str>,
     #[builder(default = "std::process::id().into()")]
     pub pid: u64,
     #[builder(default = "std::thread::current().id().as_u64().into()")]
     pub tid: u64,
     #[builder(default, setter(each = "arg"))]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub args: HashMap<String, String>,
 }
 
@@ -130,17 +133,8 @@ impl ChromeEvent {
 pub struct ChromeLayer<S, W = fn() -> std::io::Stdout> {
     pub start: Instant,
     make_writer: W,
+    events: Arc<ArrayQueue<String>>,
     _inner: PhantomData<S>,
-}
-
-impl<S> Default for ChromeLayer<S> {
-    fn default() -> ChromeLayer<S> {
-        Self {
-            start: Instant::now(),
-            make_writer: io::stdout,
-            _inner: PhantomData,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -155,12 +149,12 @@ impl<W> ChromeWriter<W>
 where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
-    pub fn with(make_writer: W) -> (Self, ChromeWriterGuard<W>) {
+    fn new(make_writer: W, events: Arc<ArrayQueue<String>>) -> (Self, ChromeWriterGuard<W>) {
         (
             Self {
                 make_writer: make_writer.clone(),
             },
-            ChromeWriterGuard::new(make_writer),
+            ChromeWriterGuard::new(make_writer, events),
         )
     }
 }
@@ -195,17 +189,21 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     make_writer: W,
+    events: Arc<ArrayQueue<String>>,
 }
 
 impl<W> ChromeWriterGuard<W>
 where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn new(make_writer: W) -> Self {
+    fn new(make_writer: W, events: Arc<ArrayQueue<String>>) -> Self {
         // Write JSON opening parenthesis
-        io::Write::write_all(&mut make_writer.make_writer(), b"[{}\n").unwrap();
+        io::Write::write_all(&mut make_writer.make_writer(), b"[\n").unwrap();
 
-        Self { make_writer }
+        Self {
+            make_writer,
+            events,
+        }
     }
 }
 
@@ -214,29 +212,60 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     fn drop(&mut self) {
+        let mut writer = self.make_writer.make_writer();
+
+        if let Some(event) = self.events.pop() {
+            let mut buf = String::with_capacity(event.len() + 1 /* Newline */ + 1 /* Null */);
+            buf.push_str(&event);
+            buf.push('\n');
+
+            io::Write::write_all(&mut writer, buf.as_bytes()).unwrap();
+        }
+
         // Write JSON closing parenthesis
-        io::Write::write_all(&mut self.make_writer.make_writer(), b"]").unwrap();
+        io::Write::write_all(&mut writer, b"]\n").unwrap();
     }
 }
 
-impl<S, W> ChromeLayer<S, W> {
-    pub fn with_writer<W2>(self, make_writer: W2) -> ChromeLayer<S, W2>
-    where
-        W2: for<'writer> MakeWriter<'writer> + 'static,
-    {
-        ChromeLayer {
-            start: Instant::now(),
-            make_writer,
-            _inner: PhantomData,
-        }
+impl<S, W> ChromeLayer<S, W>
+where
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+{
+    pub fn with_writer(make_writer: W) -> (ChromeLayer<S, ChromeWriter<W>>, ChromeWriterGuard<W>) {
+        let events = Arc::new(ArrayQueue::new(1));
+        let (make_writer, guard) = ChromeWriter::new(make_writer, events.clone());
+        (
+            ChromeLayer {
+                start: Instant::now(),
+                make_writer,
+                events,
+                _inner: PhantomData,
+            },
+            guard,
+        )
     }
 
     fn write(&self, writer: &mut dyn io::Write, event: ChromeEvent) -> io::Result<()> {
-        // For faster String concat: https://users.rust-lang.org/t/fast-string-concatenation/4425/3
-        let event = serde_json::to_string(&event).unwrap();
-        let mut buf = String::with_capacity(1 + event.len() + 1 + 1);
+        let current = serde_json::to_string(&event).unwrap();
+        if self.events.is_empty() {
+            self.events
+                .push(current)
+                .expect("Failed to insert ChromeEvent in queue");
+            return Ok(());
+        }
+
+        // Proceed only when previous event exists
+        let previous = self.events.pop().unwrap();
+
+        self.events
+            .push(current)
+            .expect("Failed to insert ChromeEvent in queue");
+
+        let mut buf = String::with_capacity(
+            previous.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
+        );
+        buf.push_str(&previous);
         buf.push(',');
-        buf.push_str(&event);
         buf.push('\n');
 
         io::Write::write_all(writer, buf.as_bytes())
@@ -307,7 +336,7 @@ struct AsyncEntered(bool);
 impl<S, W> Layer<S> for ChromeLayer<S, W>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
-    W: for<'writer> MakeWriter<'writer> + 'static,
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
@@ -408,5 +437,20 @@ mod tests {
     fn event_stringify() {
         let event = EventType::from_str("DurationBegin").unwrap();
         matches!(event, EventType::DurationBegin);
+    }
+
+    #[test]
+    fn test_serde() {
+        let event = ChromeEvent::builder(Instant::now())
+            .arg(("a".to_string(), "a".to_string()))
+            .ts(1.0)
+            .build()
+            .unwrap();
+
+        let serialized = serde_json::to_string(&event).unwrap();
+
+        let deserialized: ChromeEvent = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(event, deserialized);
     }
 }
