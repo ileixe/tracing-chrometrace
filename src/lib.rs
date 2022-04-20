@@ -279,7 +279,7 @@ struct ChromeEventVisitor {
 
 impl<'a> tracing_subscriber::field::Visit for ChromeEventVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        let value = format!("{:?}", value);
+        let value = format!("{:?}", value).trim_matches('"').to_string();
         let name = field.name();
 
         match name {
@@ -292,37 +292,30 @@ impl<'a> tracing_subscriber::field::Visit for ChromeEventVisitor {
             "id" => {
                 self.builder.id(value);
             }
-            "ph" | "ts" | "dur" | "tts" | "pid" | "tid" | "event" => {
-                let value = value.trim_matches('"');
-
-                match name {
-                    "ph" => {
-                        self.builder.ph(EventType::from_str(value)
-                            .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
-                    }
-                    "ts" => {
-                        self.builder.ts(value.parse().expect("Invalid timestamp"));
-                    }
-                    "dur" => {
-                        self.builder
-                            .dur(Some(value.parse().expect("Invalid timestamp")));
-                    }
-                    "tts" => {
-                        self.builder
-                            .tts(Some(value.parse().expect("Invalid timestamp")));
-                    }
-                    "pid" => {
-                        self.builder.pid(value.parse().unwrap());
-                    }
-                    "tid" => {
-                        self.builder.tid(value.parse().unwrap());
-                    }
-                    // Special keyword to annotate event type
-                    "event" => {
-                        self.event = Some(value.to_string());
-                    }
-                    _ => unreachable!(),
-                }
+            "ph" => {
+                self.builder.ph(EventType::from_str(&value)
+                    .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
+            }
+            "ts" => {
+                self.builder.ts(value.parse().expect("Invalid timestamp"));
+            }
+            "dur" => {
+                self.builder
+                    .dur(Some(value.parse().expect("Invalid timestamp")));
+            }
+            "tts" => {
+                self.builder
+                    .tts(Some(value.parse().expect("Invalid timestamp")));
+            }
+            "pid" => {
+                self.builder.pid(value.parse().unwrap());
+            }
+            "tid" => {
+                self.builder.tid(value.parse().unwrap());
+            }
+            "event" => {
+                // Special keyword to annotate event type
+                self.event = Some(value.to_string());
             }
             arg => {
                 self.builder.arg((arg.to_string(), value));
