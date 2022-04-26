@@ -31,7 +31,7 @@ use tracing_subscriber::{fmt::MakeWriter, layer::Context, registry::LookupSpan, 
 
 #[derive(Debug, Clone, Default, EnumString, AsRefStr, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
-    #[serde(rename = "X")]
+    #[serde(rename = "B")]
     DurationBegin,
     #[serde(rename = "E")]
     DurationEnd,
