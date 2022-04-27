@@ -232,7 +232,8 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     pub fn with_writer(make_writer: W) -> (ChromeLayer<S, ChromeWriter<W>>, ChromeWriterGuard<W>) {
-        let events = Arc::new(ArrayQueue::new(1));
+        // We assume that there will be no more than 16 concurrent threads to write
+        let events = Arc::new(ArrayQueue::new(16));
         let (make_writer, guard) = ChromeWriter::new(make_writer, events.clone());
         (
             ChromeLayer {
@@ -255,20 +256,21 @@ where
         }
 
         // Proceed only when previous event exists
-        let previous = self.events.pop().unwrap();
+        let result = self.events.pop().map_or(Ok(()), |previous| {
+            let mut buf = String::with_capacity(
+                previous.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
+            );
+            buf.push_str(&previous);
+            buf.push(',');
+            buf.push('\n');
+            io::Write::write_all(writer, buf.as_bytes())
+        });
 
         self.events
             .push(current)
             .expect("Failed to insert ChromeEvent in queue");
 
-        let mut buf = String::with_capacity(
-            previous.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
-        );
-        buf.push_str(&previous);
-        buf.push(',');
-        buf.push('\n');
-
-        io::Write::write_all(writer, buf.as_bytes())
+        result
     }
 }
 
