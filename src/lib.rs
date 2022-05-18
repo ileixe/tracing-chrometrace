@@ -214,12 +214,25 @@ where
     fn drop(&mut self) {
         let mut writer = self.make_writer.make_writer();
 
-        if let Some(event) = self.events.pop() {
+        let mut write = |event: String, is_last: bool| {
             let mut buf = String::with_capacity(event.len() + 1 /* Newline */ + 1 /* Null */);
             buf.push_str(&event);
+            if is_last == false {
+                buf.push(',');
+            }
             buf.push('\n');
 
             io::Write::write_all(&mut writer, buf.as_bytes()).unwrap();
+        };
+
+        // Write until last one left
+        while self.events.len() > 1 {
+            write(self.events.pop().unwrap(), false);
+        }
+
+        // Last one
+        if let Some(event) = self.events.pop() {
+            write(event, true);
         }
 
         // Write JSON closing parenthesis

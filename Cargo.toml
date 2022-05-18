@@ -1,6 +1,6 @@
 [package]
 name = "tracing-chrometrace"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2018"
 
 authors = ["Youseok Yang <ileixe@gmail.com>"]
