@@ -10,13 +10,12 @@
 //! tracing_subscriber::registry().with(writer).init();
 //! ```
 
-#![feature(derive_default_enum)]
 #![feature(thread_id_value)]
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, io, time::Instant};
 
 use crossbeam_queue::ArrayQueue;
@@ -133,7 +132,7 @@ impl ChromeEvent {
 pub struct ChromeLayer<S, W = fn() -> std::io::Stdout> {
     pub start: Instant,
     make_writer: W,
-    events: Arc<ArrayQueue<String>>,
+    events: Arc<Mutex<ArrayQueue<String>>>,
     _inner: PhantomData<S>,
 }
 
@@ -149,7 +148,7 @@ impl<W> ChromeWriter<W>
 where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn new(make_writer: W, events: Arc<ArrayQueue<String>>) -> (Self, ChromeWriterGuard<W>) {
+    fn new(make_writer: W, events: Arc<Mutex<ArrayQueue<String>>>) -> (Self, ChromeWriterGuard<W>) {
         (
             Self {
                 make_writer: make_writer.clone(),
@@ -189,14 +188,14 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     make_writer: W,
-    events: Arc<ArrayQueue<String>>,
+    events: Arc<Mutex<ArrayQueue<String>>>,
 }
 
 impl<W> ChromeWriterGuard<W>
 where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn new(make_writer: W, events: Arc<ArrayQueue<String>>) -> Self {
+    fn new(make_writer: W, events: Arc<Mutex<ArrayQueue<String>>>) -> Self {
         // Write JSON opening parenthesis
         io::Write::write_all(&mut make_writer.make_writer(), b"[\n").unwrap();
 
@@ -217,7 +216,7 @@ where
         let mut write = |event: String, is_last: bool| {
             let mut buf = String::with_capacity(event.len() + 1 /* Newline */ + 1 /* Null */);
             buf.push_str(&event);
-            if is_last == false {
+            if !is_last {
                 buf.push(',');
             }
             buf.push('\n');
@@ -225,14 +224,16 @@ where
             io::Write::write_all(&mut writer, buf.as_bytes()).unwrap();
         };
 
-        // Write until last one left
-        while self.events.len() > 1 {
-            write(self.events.pop().unwrap(), false);
-        }
-
-        // Last one
-        if let Some(event) = self.events.pop() {
-            write(event, true);
+        if let Ok(lock) = self.events.lock() {
+            let events = &*lock;
+            // Write until last one left
+            while events.len() > 1 {
+                write(events.pop().unwrap(), false);
+            }
+            // Last one
+            if let Some(event) = events.pop() {
+                write(event, true);
+            }
         }
 
         // Write JSON closing parenthesis
@@ -245,8 +246,7 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     pub fn with_writer(make_writer: W) -> (ChromeLayer<S, ChromeWriter<W>>, ChromeWriterGuard<W>) {
-        // We assume that there will be no more than 16 concurrent threads to write
-        let events = Arc::new(ArrayQueue::new(16));
+        let events = Arc::new(Mutex::new(ArrayQueue::new(1)));
         let (make_writer, guard) = ChromeWriter::new(make_writer, events.clone());
         (
             ChromeLayer {
@@ -261,29 +261,19 @@ where
 
     fn write(&self, writer: &mut dyn io::Write, event: ChromeEvent) -> io::Result<()> {
         let current = serde_json::to_string(&event).unwrap();
-        if self.events.is_empty() {
-            self.events
-                .push(current)
-                .expect("Failed to insert ChromeEvent in queue");
-            return Ok(());
-        }
 
         // Proceed only when previous event exists
-        let result = self.events.pop().map_or(Ok(()), |previous| {
+        if let Some(event) = self.events.lock().unwrap().force_push(current) {
             let mut buf = String::with_capacity(
-                previous.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
+                event.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
             );
-            buf.push_str(&previous);
+            buf.push_str(&event);
             buf.push(',');
             buf.push('\n');
             io::Write::write_all(writer, buf.as_bytes())
-        });
-
-        self.events
-            .push(current)
-            .expect("Failed to insert ChromeEvent in queue");
-
-        result
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -292,7 +282,7 @@ struct ChromeEventVisitor {
     event: Option<String>,
 }
 
-impl<'a> tracing_subscriber::field::Visit for ChromeEventVisitor {
+impl tracing_subscriber::field::Visit for ChromeEventVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         let value = format!("{:?}", value).trim_matches('"').to_string();
         let name = field.name();
@@ -330,7 +320,7 @@ impl<'a> tracing_subscriber::field::Visit for ChromeEventVisitor {
             }
             "event" => {
                 // Special keyword to annotate event type
-                self.event = Some(value.to_string());
+                self.event = Some(value);
             }
             arg => {
                 self.builder.arg((arg.to_string(), value));

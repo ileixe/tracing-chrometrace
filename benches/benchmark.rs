@@ -53,9 +53,9 @@ fn chrome(c: &mut Criterion) {
 fn chrometrace(c: &mut Criterion) {
     let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::sink());
 
-    let chrome = ChromeLayer::default().with_writer(non_blocking);
+    let (writer, guard) = ChromeLayer::with_writer(non_blocking);
 
-    tracing_subscriber::registry().with(chrome).init();
+    tracing_subscriber::registry().with(writer).init();
 
     c.bench_function("info", |b| {
         b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
