@@ -10,6 +10,7 @@
 //! tracing_subscriber::registry().with(writer).init();
 //! ```
 
+#![feature(derive_default_enum)]
 #![feature(thread_id_value)]
 
 use std::borrow::Cow;
