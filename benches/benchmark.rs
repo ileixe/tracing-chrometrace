@@ -1,11 +1,8 @@
 #![allow(unused)]
-use std::{
-    marker::PhantomData,
-    thread::ThreadId,
-    time::{Duration, SystemTime},
-};
+use std::{marker::PhantomData, thread::{self, ThreadId}, time::{Duration, Instant, SystemTime}};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use tokio::runtime::Runtime;
+use criterion::{criterion_group, criterion_main, Criterion, black_box};
 use tracing::{info, Subscriber};
 use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
 use tracing_chrometrace::ChromeLayer;
@@ -63,6 +60,26 @@ fn chrometrace(c: &mut Criterion) {
     c.bench_function("instrument", |b| b.iter(|| hello()));
 }
 
+fn chrometrace_parallel(c: &mut Criterion) {
+    let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::sink());
+
+    let (writer, guard) = ChromeLayer::with_writer(non_blocking);
+
+    tracing_subscriber::registry().with(writer).init();
+
+    std::thread::spawn(|| {
+        loop {
+            info!(target = "chrome_layer", name = "hello", tid = 2);
+            std::thread::sleep(Duration::from_nanos(1));
+        }
+    });
+
+    c.bench_function("info", |b| {
+        b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
+    });
+    c.bench_function("instrument", |b| b.iter(|| hello()));
+}
+
 fn emptylayer(c: &mut Criterion) {
     struct EmptyLayer<S> {
         _inner: PhantomData<S>,
@@ -110,6 +127,7 @@ criterion_group!(
     // chrome, /* 3.22 us */
     // emptylayer, /* 200 ns */
     // manual /* 77 ns */
-    chrometrace, /* 2 us */
+    // chrometrace, /* 2 us */
+    chrometrace_parallel /* info: 2.5, instrument: 3.9 us */
 );
 criterion_main!(benches);
