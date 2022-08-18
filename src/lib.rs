@@ -29,7 +29,7 @@ use tracing::Subscriber;
 use tracing::{span, Event};
 use tracing_subscriber::{fmt::MakeWriter, layer::Context, registry::LookupSpan, Layer};
 
-#[derive(Debug, Clone, Default, EnumString, AsRefStr, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Copy, Clone, Default, EnumString, AsRefStr, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
     #[serde(rename = "B")]
     DurationBegin,
