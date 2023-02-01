@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "tracing-chrometrace"
-version = "0.1.17"
+version = "0.1.18"
 dependencies = [
  "criterion",
  "crossbeam-queue",

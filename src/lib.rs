@@ -10,14 +10,13 @@
 //! tracing_subscriber::registry().with(writer).init();
 //! ```
 
-#![feature(derive_default_enum)]
 #![feature(thread_id_value)]
 
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::{collections::HashMap, io, time::Instant};
+use std::{collections::HashMap, io, time::SystemTime};
 
 use crossbeam_queue::ArrayQueue;
 use derivative::Derivative;
@@ -84,11 +83,11 @@ pub enum EventType {
 #[builder(derive(Debug))]
 pub struct ChromeEvent {
     #[builder(setter(custom))]
-    #[serde(default = "Instant::now")]
+    #[serde(default = "SystemTime::now")]
     #[serde(skip)]
     #[allow(unused)]
     #[derivative(PartialEq = "ignore")]
-    start: Instant,
+    start: SystemTime,
     #[builder(default)]
     #[builder(setter(into))]
     pub name: Cow<'static, str>,
@@ -98,7 +97,7 @@ pub struct ChromeEvent {
     #[builder(default)]
     pub ph: EventType,
     #[builder(
-        default = "Instant::now().duration_since(self.start.unwrap()).as_nanos() as f64 / 1000.0"
+        default = "SystemTime::now().duration_since(self.start.unwrap()).unwrap().as_nanos() as f64 / 1000.0"
     )]
     pub ts: f64,
     #[builder(default)]
@@ -121,7 +120,7 @@ pub struct ChromeEvent {
 }
 
 impl ChromeEvent {
-    pub fn builder(start: Instant) -> ChromeEventBuilder {
+    pub fn builder(start: SystemTime) -> ChromeEventBuilder {
         ChromeEventBuilder {
             start: Some(start),
             ..ChromeEventBuilder::create_empty()
@@ -131,7 +130,7 @@ impl ChromeEvent {
 
 #[derive(Debug)]
 pub struct ChromeLayer<S, W = fn() -> std::io::Stdout> {
-    pub start: Instant,
+    pub start: SystemTime,
     make_writer: W,
     events: Arc<Mutex<ArrayQueue<String>>>,
     _inner: PhantomData<S>,
@@ -251,7 +250,7 @@ where
         let (make_writer, guard) = ChromeWriter::new(make_writer, events.clone());
         (
             ChromeLayer {
-                start: Instant::now(),
+                start: SystemTime::now(),
                 make_writer,
                 events,
                 _inner: PhantomData,
@@ -285,7 +284,7 @@ struct ChromeEventVisitor {
 
 impl tracing_subscriber::field::Visit for ChromeEventVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        let value = format!("{:?}", value).trim_matches('"').to_string();
+        let value = format!("{value:?}").trim_matches('"').to_string();
         let name = field.name();
 
         match name {
@@ -440,7 +439,7 @@ mod tests {
 
     #[test]
     fn test_serde() {
-        let event = ChromeEvent::builder(Instant::now())
+        let event = ChromeEvent::builder(SystemTime::now())
             .arg(("a".to_string(), "a".to_string()))
             .ts(1.0)
             .build()
