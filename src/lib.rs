@@ -134,6 +134,7 @@ pub struct ChromeLayer<S, W = fn() -> std::io::Stdout> {
     make_writer: W,
     events: Arc<Mutex<ArrayQueue<String>>>,
     _inner: PhantomData<S>,
+	tx: crossbeam::channel::Sender<Message>,
 }
 
 #[derive(Clone, Debug)]
@@ -240,13 +241,44 @@ where
         io::Write::write_all(&mut writer, b"]\n").unwrap();
     }
 }
+#[derive(Debug)]
+enum Message {
+	Event(ChromeEvent),
+	Drop,
+}
 
 impl<S, W> ChromeLayer<S, W>
 where
-    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static + std::marker::Send,
 {
-    pub fn with_writer(make_writer: W) -> (ChromeLayer<S, ChromeWriter<W>>, ChromeWriterGuard<W>) {
+    pub fn with_writer(make_writer: W) -> (ChromeLayer<S, ChromeWriter<W>>, ChromeWriterGuard<W>)
+	{
         let events = Arc::new(Mutex::new(ArrayQueue::new(1)));
+
+		let cloned_make_writer = make_writer.clone();
+
+		// let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100000000);
+		let (tx, mut rx) = crossbeam::channel::bounded(10000000);
+		let handle = std::thread::spawn(move || {
+			while let Ok(msg) = rx.recv() {
+				match msg {
+					Message::Event(event) => {
+						let event = serde_json::to_string(&event).unwrap();
+						let mut buf = String::with_capacity(
+							event.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
+						);
+						buf.push_str(&event);
+						buf.push(',');
+						buf.push('\n');
+						io::Write::write_all(&mut cloned_make_writer.make_writer(), buf.as_bytes()).unwrap();
+					}
+					Message::Drop => {
+						break;
+					}
+				}
+			}
+		});
+
         let (make_writer, guard) = ChromeWriter::new(make_writer, events.clone());
         (
             ChromeLayer {
@@ -254,26 +286,30 @@ where
                 make_writer,
                 events,
                 _inner: PhantomData,
+				tx,
             },
             guard,
         )
     }
 
-    fn write(&self, writer: &mut dyn io::Write, event: ChromeEvent) -> io::Result<()> {
-        let current = serde_json::to_string(&event).unwrap();
+    fn write(&self, event: ChromeEvent) -> io::Result<()> {
 
-        // Proceed only when previous event exists
-        if let Some(event) = self.events.lock().unwrap().force_push(current) {
-            let mut buf = String::with_capacity(
-                event.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
-            );
-            buf.push_str(&event);
-            buf.push(',');
-            buf.push('\n');
-            io::Write::write_all(writer, buf.as_bytes())
-        } else {
-            Ok(())
-        }
+		self.tx.try_send(Message::Event(event)).unwrap();
+		Ok(())
+        // let current = serde_json::to_string(&event).unwrap();
+
+        // // Proceed only when previous event exists
+        // if let Some(event) = self.events.lock().unwrap().force_push(current) {
+        //     let mut buf = String::with_capacity(
+        //         event.len() + 1 /* Comma */ + 1 /* Newline */ + 1, /* Null */
+        //     );
+        //     buf.push_str(&event);
+        //     buf.push(',');
+        //     buf.push('\n');
+        //     io::Write::write_all(writer, buf.as_bytes())
+        // } else {
+        //     Ok(())
+        // }
     }
 }
 
@@ -334,7 +370,7 @@ struct AsyncEntered(bool);
 impl<S, W> Layer<S> for ChromeLayer<S, W>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
-    W: Clone + for<'writer> MakeWriter<'writer> + 'static,
+    W: Clone + for<'writer> MakeWriter<'writer> + 'static + std::marker::Send,
 {
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
@@ -344,7 +380,6 @@ where
             event: None,
         };
         attrs.record(&mut visitor);
-
         span.extensions_mut().insert(visitor);
     }
 
@@ -360,7 +395,7 @@ where
         event.record(&mut visitor);
 
         self.write(
-            &mut self.make_writer.make_writer(),
+            // &mut self.make_writer.make_writer(),
             visitor.builder.build().unwrap(),
         )
         .expect("Failed to write event in tracing-chrometrace");
@@ -391,8 +426,10 @@ where
                 visitor.builder.ph(EventType::DurationBegin);
             }
 
+            visitor.builder.ph(EventType::DurationBegin);			
+
             self.write(
-                &mut self.make_writer.make_writer(),
+                // &mut self.make_writer.make_writer(),
                 visitor.builder.build().unwrap(),
             )
             .expect("Failed to write event in tracing-chrometrace");
@@ -419,7 +456,7 @@ where
             }
 
             self.write(
-                &mut self.make_writer.make_writer(),
+                // &mut self.make_writer.make_writer(),
                 visitor.builder.build().unwrap(),
             )
             .expect("Failed to write event in tracing-chrometrace");
