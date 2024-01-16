@@ -15,10 +15,11 @@
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+// use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::{collections::HashMap, io, time::SystemTime};
 
-use crossbeam_queue::ArrayQueue;
+// use crossbeam_queue::ArrayQueue;
 use derivative::Derivative;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
@@ -110,9 +111,13 @@ pub struct ChromeEvent {
     #[builder(setter(into))]
     #[serde(default, skip_serializing_if = "str::is_empty")]
     pub id: Cow<'static, str>,
-    #[builder(default = "std::process::id().into()")]
+
+	// #[builder(default = "1")]
+    #[builder(default = "std::process::id().into()")]	
     pub pid: u64,
-    #[builder(default = "std::thread::current().id().as_u64().into()")]
+    
+	// #[builder(default = "1")]
+	#[builder(default = "std::thread::current().id().as_u64().into()")]	
     pub tid: u64,
     #[builder(default, setter(each = "arg"))]
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -132,7 +137,6 @@ impl ChromeEvent {
 pub struct ChromeLayer<S, W = fn() -> std::io::Stdout> {
     pub start: SystemTime,
     make_writer: W,
-    events: Arc<Mutex<ArrayQueue<String>>>,
     _inner: PhantomData<S>,
 	tx: crossbeam::channel::Sender<Message>,
 }
@@ -149,12 +153,12 @@ impl<W> ChromeWriter<W>
 where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn new(make_writer: W, events: Arc<Mutex<ArrayQueue<String>>>) -> (Self, ChromeWriterGuard<W>) {
+    fn new(make_writer: W, tx: crossbeam::channel::Sender<Message>, handle: JoinHandle<()>) -> (Self, ChromeWriterGuard<W>) {
         (
             Self {
                 make_writer: make_writer.clone(),
             },
-            ChromeWriterGuard::new(make_writer, events),
+            ChromeWriterGuard::new(make_writer, tx, handle),
         )
     }
 }
@@ -189,20 +193,22 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     make_writer: W,
-    events: Arc<Mutex<ArrayQueue<String>>>,
+	tx: crossbeam::channel::Sender<Message>,
+	handle: Option<JoinHandle<()>>,
 }
 
 impl<W> ChromeWriterGuard<W>
 where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn new(make_writer: W, events: Arc<Mutex<ArrayQueue<String>>>) -> Self {
+    fn new(make_writer: W, tx: crossbeam::channel::Sender<Message>, handle: JoinHandle<()>) -> Self {
         // Write JSON opening parenthesis
         io::Write::write_all(&mut make_writer.make_writer(), b"[\n").unwrap();
 
         Self {
             make_writer,
-            events,
+            tx,
+			handle: Some(handle),
         }
     }
 }
@@ -212,33 +218,35 @@ where
     W: Clone + for<'writer> MakeWriter<'writer> + 'static,
 {
     fn drop(&mut self) {
-        let mut writer = self.make_writer.make_writer();
+        // let mut writer = self.make_writer.make_writer();
 
-        let mut write = |event: String, is_last: bool| {
-            let mut buf = String::with_capacity(event.len() + 1 /* Newline */ + 1 /* Null */);
-            buf.push_str(&event);
-            if !is_last {
-                buf.push(',');
-            }
-            buf.push('\n');
+        // let mut write = |event: String, is_last: bool| {
+        //     let mut buf = String::with_capacity(event.len() + 1 /* Newline */ + 1 /* Null */);
+        //     buf.push_str(&event);
+        //     if !is_last {
+        //         buf.push(',');
+        //     }
+        //     buf.push('\n');
 
-            io::Write::write_all(&mut writer, buf.as_bytes()).unwrap();
-        };
+        //     io::Write::write_all(&mut writer, buf.as_bytes()).unwrap();
+        // };
 
-        if let Ok(lock) = self.events.lock() {
-            let events = &*lock;
-            // Write until last one left
-            while events.len() > 1 {
-                write(events.pop().unwrap(), false);
-            }
-            // Last one
-            if let Some(event) = events.pop() {
-                write(event, true);
-            }
-        }
+        // if let Ok(lock) = self.events.lock() {
+        //     let events = &*lock;
+        //     // Write until last one left
+        //     while events.len() > 1 {
+        //         write(events.pop().unwrap(), false);
+        //     }
+        //     // Last one
+        //     if let Some(event) = events.pop() {
+        //         write(event, true);
+        //     }
+        // }
 
-        // Write JSON closing parenthesis
-        io::Write::write_all(&mut writer, b"]\n").unwrap();
+        // // Write JSON closing parenthesis
+        // io::Write::write_all(&mut writer, b"]\n").unwrap();
+		self.tx.send(Message::Drop).unwrap();
+		self.handle.take().unwrap().join().unwrap();
     }
 }
 #[derive(Debug)]
@@ -253,12 +261,12 @@ where
 {
     pub fn with_writer(make_writer: W) -> (ChromeLayer<S, ChromeWriter<W>>, ChromeWriterGuard<W>)
 	{
-        let events = Arc::new(Mutex::new(ArrayQueue::new(1)));
+        // let events = Arc::new(Mutex::new(ArrayQueue::new(1)));
 
 		let cloned_make_writer = make_writer.clone();
 
 		// let (tx, mut rx) = tokio::sync::mpsc::channel::<Message>(100000000);
-		let (tx, mut rx) = crossbeam::channel::bounded(10000000);
+		let (tx, rx) = crossbeam::channel::bounded(100000000);
 		let handle = std::thread::spawn(move || {
 			while let Ok(msg) = rx.recv() {
 				match msg {
@@ -279,12 +287,11 @@ where
 			}
 		});
 
-        let (make_writer, guard) = ChromeWriter::new(make_writer, events.clone());
+        let (make_writer, guard) = ChromeWriter::new(make_writer, tx.clone(), handle);
         (
             ChromeLayer {
                 start: SystemTime::now(),
                 make_writer,
-                events,
                 _inner: PhantomData,
 				tx,
             },
@@ -319,6 +326,54 @@ struct ChromeEventVisitor {
 }
 
 impl tracing_subscriber::field::Visit for ChromeEventVisitor {
+	fn record_value(&mut self, field: &tracing::field::Field, value: valuable::Value<'_>) {
+		let value = match value {
+			valuable::Value::String(s) => s.to_string(),
+			valuable::Value::I32(i) => i.to_string(),
+			_ => "".to_string(),
+		};
+        let name = field.name();
+        match name {
+            "name" => {
+                self.builder.name(value);
+            }
+            "cat" => {
+                self.builder.cat(value);
+            }
+            "id" => {
+                self.builder.id(value);
+            }
+            "ph" => {
+                self.builder.ph(EventType::from_str(&value)
+                    .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
+            }
+            "ts" => {
+                self.builder.ts(value.parse().expect("Invalid timestamp"));
+            }
+            "dur" => {
+                self.builder
+                    .dur(Some(value.parse().expect("Invalid timestamp")));
+            }
+            "tts" => {
+                self.builder
+                    .tts(Some(value.parse().expect("Invalid timestamp")));
+            }
+            "pid" => {
+                self.builder.pid(value.parse().unwrap());
+            }
+            "tid" => {
+                self.builder.tid(value.parse().unwrap());
+            }
+            "event" => {
+                // Special keyword to annotate event type
+                self.event = Some(value);
+            }
+            arg => {
+                self.builder.arg((arg.to_string(), value));
+            }
+        }
+	}
+	
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         let value = format!("{value:?}").trim_matches('"').to_string();
         let name = field.name();
