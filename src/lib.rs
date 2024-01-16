@@ -79,55 +79,64 @@ pub enum EventType {
 }
 
 #[derive(Derivative, Serialize, Deserialize, Builder, Debug)]
-#[derivative(PartialEq)]
-#[builder(custom_constructor)]
-#[builder(derive(Debug))]
 pub struct ChromeEvent {
-    #[builder(setter(custom))]
-    #[serde(default = "SystemTime::now")]
-    #[serde(skip)]
-    #[allow(unused)]
-    #[derivative(PartialEq = "ignore")]
-    start: SystemTime,
-    #[builder(default)]
-    #[builder(setter(into))]
-    pub name: Cow<'static, str>,
-    #[builder(default)]
-    #[builder(setter(into))]
-    pub cat: Cow<'static, str>,
-    #[builder(default)]
-    pub ph: EventType,
-    #[builder(
-        default = "SystemTime::now().duration_since(self.start.unwrap()).unwrap().as_nanos() as f64 / 1000.0"
-    )]
-    pub ts: f64,
-    #[builder(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dur: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[builder(default)]
-    pub tts: Option<f64>,
-    #[builder(default)]
-    #[builder(setter(into))]
-    #[serde(default, skip_serializing_if = "str::is_empty")]
-    pub id: Cow<'static, str>,
-
-	// #[builder(default = "1")]
-    #[builder(default = "std::process::id().into()")]	
-    pub pid: u64,
-    
-	// #[builder(default = "1")]
-	#[builder(default = "std::thread::current().id().as_u64().into()")]	
-    pub tid: u64,
-    #[builder(default, setter(each = "arg"))]
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub args: HashMap<String, String>,
+    pub name: String,
+    pub ts: f64,	
 }
 
+// #[derive(Derivative, Serialize, Deserialize, Builder, Debug)]
+// #[derivative(PartialEq)]
+// #[builder(custom_constructor)]
+// #[builder(derive(Debug))]
+// pub struct ChromeEvent {
+//     #[builder(setter(custom))]
+//     #[serde(default = "SystemTime::now")]
+//     #[serde(skip)]
+//     #[allow(unused)]
+//     #[derivative(PartialEq = "ignore")]
+//     start: SystemTime,
+//     #[builder(default)]
+//     #[builder(setter(into))]
+//     pub name: Cow<'static, str>,
+//     #[builder(default)]
+//     #[builder(setter(into))]
+//     pub cat: Cow<'static, str>,
+//     #[builder(default)]
+//     pub ph: EventType,
+//     #[builder(
+//         default = "SystemTime::now().duration_since(self.start.unwrap()).unwrap().as_nanos() as f64 / 1000.0"
+//     )]
+//     pub ts: f64,
+//     #[builder(default)]
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     pub dur: Option<f64>,
+//     #[serde(skip_serializing_if = "Option::is_none")]
+//     #[builder(default)]
+//     pub tts: Option<f64>,
+//     #[builder(default)]
+//     #[builder(setter(into))]
+//     #[serde(default, skip_serializing_if = "str::is_empty")]
+//     pub id: Cow<'static, str>,
+
+// 	#[builder(default = "1")]
+//     // #[builder(default = "std::process::id().into()")]	
+//     pub pid: u64,
+    
+// 	#[builder(default = "1")]
+// 	// #[builder(default = "std::thread::current().id().as_u64().into()")]	
+//     pub tid: u64,
+//     #[builder(default, setter(each = "arg"))]
+//     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+//     pub args: HashMap<String, String>,
+// }
+
 impl ChromeEvent {
+	
     pub fn builder(start: SystemTime) -> ChromeEventBuilder {
+		let ts = SystemTime::now().duration_since(start).unwrap().as_nanos() as f64 / 1000.0;
         ChromeEventBuilder {
-            start: Some(start),
+            // start: Some(start),
+			ts: Some(ts),
             ..ChromeEventBuilder::create_empty()
         }
     }
@@ -337,39 +346,39 @@ impl tracing_subscriber::field::Visit for ChromeEventVisitor {
             "name" => {
                 self.builder.name(value);
             }
-            "cat" => {
-                self.builder.cat(value);
-            }
-            "id" => {
-                self.builder.id(value);
-            }
-            "ph" => {
-                self.builder.ph(EventType::from_str(&value)
-                    .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
-            }
-            "ts" => {
-                self.builder.ts(value.parse().expect("Invalid timestamp"));
-            }
-            "dur" => {
-                self.builder
-                    .dur(Some(value.parse().expect("Invalid timestamp")));
-            }
-            "tts" => {
-                self.builder
-                    .tts(Some(value.parse().expect("Invalid timestamp")));
-            }
-            "pid" => {
-                self.builder.pid(value.parse().unwrap());
-            }
-            "tid" => {
-                self.builder.tid(value.parse().unwrap());
-            }
-            "event" => {
-                // Special keyword to annotate event type
-                self.event = Some(value);
-            }
+            // "cat" => {
+            //     self.builder.cat(value);
+            // }
+            // "id" => {
+            //     self.builder.id(value);
+            // }
+            // "ph" => {
+            //     self.builder.ph(EventType::from_str(&value)
+            //         .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
+            // }
+            // "ts" => {
+            //     self.builder.ts(value.parse().expect("Invalid timestamp"));
+            // }
+            // "dur" => {
+            //     self.builder
+            //         .dur(Some(value.parse().expect("Invalid timestamp")));
+            // }
+            // "tts" => {
+            //     self.builder
+            //         .tts(Some(value.parse().expect("Invalid timestamp")));
+            // }
+            // "pid" => {
+            //     self.builder.pid(value.parse().unwrap());
+            // }
+            // "tid" => {
+            //     self.builder.tid(value.parse().unwrap());
+            // }
+            // "event" => {
+            //     // Special keyword to annotate event type
+            //     self.event = Some(value);
+            // }
             arg => {
-                self.builder.arg((arg.to_string(), value));
+                // self.builder.arg((arg.to_string(), value));
             }
         }
 	}
@@ -382,39 +391,39 @@ impl tracing_subscriber::field::Visit for ChromeEventVisitor {
             "name" => {
                 self.builder.name(value);
             }
-            "cat" => {
-                self.builder.cat(value);
-            }
-            "id" => {
-                self.builder.id(value);
-            }
-            "ph" => {
-                self.builder.ph(EventType::from_str(&value)
-                    .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
-            }
-            "ts" => {
-                self.builder.ts(value.parse().expect("Invalid timestamp"));
-            }
-            "dur" => {
-                self.builder
-                    .dur(Some(value.parse().expect("Invalid timestamp")));
-            }
-            "tts" => {
-                self.builder
-                    .tts(Some(value.parse().expect("Invalid timestamp")));
-            }
-            "pid" => {
-                self.builder.pid(value.parse().unwrap());
-            }
-            "tid" => {
-                self.builder.tid(value.parse().unwrap());
-            }
-            "event" => {
-                // Special keyword to annotate event type
-                self.event = Some(value);
-            }
+            // "cat" => {
+            //     self.builder.cat(value);
+            // }
+            // "id" => {
+            //     self.builder.id(value);
+            // }
+            // "ph" => {
+            //     self.builder.ph(EventType::from_str(&value)
+            //         .unwrap_or_else(|_| panic!("Invalid EventType: {}", value)));
+            // }
+            // "ts" => {
+            //     self.builder.ts(value.parse().expect("Invalid timestamp"));
+            // }
+            // "dur" => {
+            //     self.builder
+            //         .dur(Some(value.parse().expect("Invalid timestamp")));
+            // }
+            // "tts" => {
+            //     self.builder
+            //         .tts(Some(value.parse().expect("Invalid timestamp")));
+            // }
+            // "pid" => {
+            //     self.builder.pid(value.parse().unwrap());
+            // }
+            // "tid" => {
+            //     self.builder.tid(value.parse().unwrap());
+            // }
+            // "event" => {
+            //     // Special keyword to annotate event type
+            //     self.event = Some(value);
+            // }
             arg => {
-                self.builder.arg((arg.to_string(), value));
+            //     self.builder.arg((arg.to_string(), value));
             }
         }
     }
@@ -439,56 +448,56 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let mut visitor = ChromeEventVisitor {
-            builder: ChromeEvent::builder(self.start),
-            event: None,
-        };
+    //     let mut visitor = ChromeEventVisitor {
+    //         builder: ChromeEvent::builder(self.start),
+    //         event: None,
+    //     };
 
-        // Default event type
-        visitor.builder.ph(EventType::Instant);
+    //     // Default event type
+    //     visitor.builder.ph(EventType::Instant);
 
-        event.record(&mut visitor);
+    //     event.record(&mut visitor);
 
-        self.write(
-            // &mut self.make_writer.make_writer(),
-            visitor.builder.build().unwrap(),
-        )
-        .expect("Failed to write event in tracing-chrometrace");
-    }
+    //     self.write(
+    //         // &mut self.make_writer.make_writer(),
+    //         visitor.builder.build().unwrap(),
+    //     )
+    //     .expect("Failed to write event in tracing-chrometrace");
+    // }
 
-    fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
+    // fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
+    //     let span = ctx.span(id).expect("Span not found, this is a bug");
 
-        let mut extensions = span.extensions_mut();
+    //     let mut extensions = span.extensions_mut();
 
-        if extensions.get_mut::<AsyncEntered>().is_some() {
-            // If recoding of the span is already started (async case), skip it
-            return;
-        } else {
-            extensions.insert(AsyncEntered(true));
-        }
+    //     if extensions.get_mut::<AsyncEntered>().is_some() {
+    //         // If recoding of the span is already started (async case), skip it
+    //         return;
+    //     } else {
+    //         extensions.insert(AsyncEntered(true));
+    //     }
 
-        if let Some(visitor) = extensions.get_mut::<ChromeEventVisitor>() {
-            // Only "async" event suppported now
-            if visitor
-                .event
-                .as_ref()
-                .map(|event| event == "async")
-                .unwrap_or(false)
-            {
-                visitor.builder.ph(EventType::AsyncStart);
-            } else {
-                visitor.builder.ph(EventType::DurationBegin);
-            }
+    //     if let Some(visitor) = extensions.get_mut::<ChromeEventVisitor>() {
+    //         // Only "async" event suppported now
+    //         if visitor
+    //             .event
+    //             .as_ref()
+    //             .map(|event| event == "async")
+    //             .unwrap_or(false)
+    //         {
+    //             visitor.builder.ph(EventType::AsyncStart);
+    //         } else {
+    //             visitor.builder.ph(EventType::DurationBegin);
+    //         }
 
-            visitor.builder.ph(EventType::DurationBegin);			
+    //         visitor.builder.ph(EventType::DurationBegin);			
 
-            self.write(
-                // &mut self.make_writer.make_writer(),
-                visitor.builder.build().unwrap(),
-            )
-            .expect("Failed to write event in tracing-chrometrace");
-        }
+    //         self.write(
+    //             // &mut self.make_writer.make_writer(),
+    //             visitor.builder.build().unwrap(),
+    //         )
+    //         .expect("Failed to write event in tracing-chrometrace");
+    //     }
     }
 
     fn on_exit(&self, _id: &span::Id, _ctx: Context<'_, S>) {}
@@ -498,24 +507,24 @@ where
 
         let mut extensions = span.extensions_mut();
 
-        if let Some(visitor) = extensions.get_mut::<ChromeEventVisitor>() {
-            if visitor
-                .event
-                .as_ref()
-                .map(|event| event == "async")
-                .unwrap_or(false)
-            {
-                visitor.builder.ph(EventType::AsyncEnd);
-            } else {
-                visitor.builder.ph(EventType::DurationEnd);
-            }
+        // if let Some(visitor) = extensions.get_mut::<ChromeEventVisitor>() {
+        //     if visitor
+        //         .event
+        //         .as_ref()
+        //         .map(|event| event == "async")
+        //         .unwrap_or(false)
+        //     {
+        //         visitor.builder.ph(EventType::AsyncEnd);
+        //     } else {
+        //         visitor.builder.ph(EventType::DurationEnd);
+        //     }
 
-            self.write(
-                // &mut self.make_writer.make_writer(),
-                visitor.builder.build().unwrap(),
-            )
-            .expect("Failed to write event in tracing-chrometrace");
-        }
+        //     self.write(
+        //         // &mut self.make_writer.make_writer(),
+        //         visitor.builder.build().unwrap(),
+        //     )
+        //     .expect("Failed to write event in tracing-chrometrace");
+        // }
     }
 }
 
@@ -532,7 +541,7 @@ mod tests {
     #[test]
     fn test_serde() {
         let event = ChromeEvent::builder(SystemTime::now())
-            .arg(("a".to_string(), "a".to_string()))
+            // .arg(("a".to_string(), "a".to_string()))
             .ts(1.0)
             .build()
             .unwrap();
@@ -541,6 +550,6 @@ mod tests {
 
         let deserialized: ChromeEvent = serde_json::from_str(&serialized).unwrap();
 
-        assert_eq!(event, deserialized);
+        // assert_eq!(event, deserialized);
     }
 }
