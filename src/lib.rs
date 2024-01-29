@@ -17,16 +17,17 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::io::Write;
 use std::marker::PhantomData;
-use std::str::FromStr;
 use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 use std::time::Instant;
-use std::{collections::HashMap, io, time::SystemTime};
+use std::{collections::HashMap, io};
 use strum::AsRefStr;
 use strum_macros::EnumString;
 use tracing::Subscriber;
 use tracing::{span, Event};
 use tracing_subscriber::{fmt::MakeWriter, layer::Context, registry::LookupSpan, Layer};
+
+pub mod minimal;
 
 #[derive(Debug, Copy, Clone, Default, EnumString, AsRefStr, Serialize, Deserialize, PartialEq)]
 pub enum EventType {
@@ -82,12 +83,6 @@ pub enum EventType {
 #[builder(custom_constructor)]
 #[builder(derive(Debug))]
 pub struct ChromeEvent {
-    #[builder(setter(custom))]
-    #[serde(default = "SystemTime::now")]
-    #[serde(skip)]
-    #[allow(unused)]
-    #[derivative(PartialEq = "ignore")]
-    start: SystemTime,
     #[builder(default)]
     #[builder(setter(into))]
     pub name: Cow<'static, str>,
@@ -96,9 +91,7 @@ pub struct ChromeEvent {
     pub cat: Cow<'static, str>,
     #[builder(default)]
     pub ph: EventType,
-    #[builder(
-        default = "SystemTime::now().duration_since(self.start.unwrap()).unwrap().as_nanos() as f64 / 1000.0"
-    )]
+    #[builder(default = "0f64")]
     pub ts: f64,
     #[builder(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,20 +105,19 @@ pub struct ChromeEvent {
     pub id: Cow<'static, str>,
 
     #[builder(default = "1")]
-    // #[builder(default = "std::process::id().into()")]
     pub pid: u64,
 
     #[builder(default = "1")]
-    // #[builder(default = "std::thread::current().id().as_u64().into()")]
     pub tid: u64,
+
     #[builder(default, setter(each = "arg"))]
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub args: HashMap<String, String>,
 }
 
 impl ChromeEvent {
-    pub fn builder(start: SystemTime) -> ChromeEventBuilder {
-        let ts = SystemTime::now().duration_since(start).unwrap().as_nanos() as f64 / 1000.0;
+    pub fn builder(start: Instant) -> ChromeEventBuilder {
+        let ts = Instant::now().duration_since(start).as_nanos() as f64 / 1000.0;
         ChromeEventBuilder {
             // start: Some(start),
             ts: Some(ts),
@@ -134,12 +126,18 @@ impl ChromeEvent {
     }
 }
 
+#[derive(Debug, Default, Builder)]
+pub struct ChromeLayerConfig {
+    pub batch_size: usize,
+}
+
 #[derive(Debug)]
 pub struct ChromeLayer<S> {
     _inner: PhantomData<S>,
     tx: crossbeam::channel::Sender<Message>,
     buffer: Arc<RwLock<Vec<SpanInfo>>>,
     map: Arc<RwLock<HashMap<span::Id, SpanInfo>>>,
+    config: ChromeLayerConfig,
 }
 
 pub struct ChromeWriterGuard {
@@ -163,6 +161,7 @@ impl Drop for ChromeWriterGuard {
         handle.join().unwrap();
     }
 }
+
 #[derive(Debug)]
 enum Message {
     Span(Vec<SpanInfo>),
@@ -184,16 +183,23 @@ where
         };
         let ts = duration.as_nanos() as f64 / 1000.0;
         let name = span.name.unwrap_or("no name".to_string());
-        let begin = serde_json::json!({
-            "name" : name,
-            "cat" : "some category",
-            "ph": "B",
-            "pid": 1,
-            "tid": 1,
-            "ts": ts,
-        });
+
+        let begin_event = ChromeEvent::builder(start_time)
+            .name(name.clone())
+            .ts(ts)
+            .ph(EventType::DurationBegin)
+            .build()
+            .expect("failed to build event");
+        serde_json::to_writer(&mut writer, &begin_event).unwrap();
+
         let ts = span.end.unwrap().duration_since(start).as_nanos() as f64 / 1000.0;
-        serde_json::to_writer(&mut writer, &begin).unwrap();
+        let end_event = ChromeEvent::builder(start_time)
+            .name(name.clone())
+            .ts(ts)
+            .ph(EventType::DurationEnd)
+            .build()
+            .expect("failed to build event");
+        serde_json::to_writer(&mut writer, &end_event).unwrap();
         writer.write(b",\n").unwrap();
 
         let end = serde_json::json!({
@@ -248,27 +254,35 @@ impl<S> ChromeLayer<S> {
                 tx,
                 buffer,
                 map: Arc::new(RwLock::new(HashMap::new())),
+                config: ChromeLayerConfig { batch_size: 10000 },
             },
             guard,
         )
     }
 }
 
-struct SimpleVisitor<'a> {
+struct SpanInfoVisitor<'a> {
     span_info: &'a mut SpanInfo,
 }
 
-impl tracing_subscriber::field::Visit for SimpleVisitor<'_> {
+impl tracing_subscriber::field::Visit for SpanInfoVisitor<'_> {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "name" {
-            self.span_info.name = Some(format!("{value:?}"));
+        match field.name() {
+            "name" => {
+                self.span_info.name = Some(format!("{value:?}"));
+            }
+            "cat" => {
+                self.span_info.cat = Some(format!("{value:?}"));
+            }
+            _ => {}
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 struct SpanInfo {
     name: Option<String>,
+    cat: Option<String>,
     start: Option<Instant>,
     end: Option<Instant>,
 }
@@ -278,12 +292,8 @@ where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, _ctx: Context<'_, S>) {
-        let mut span_info = SpanInfo {
-            name: None,
-            start: None,
-            end: None,
-        };
-        attrs.record(&mut SimpleVisitor {
+        let mut span_info = SpanInfo::default();
+        attrs.record(&mut SpanInfoVisitor {
             span_info: &mut span_info,
         });
         self.map.write().unwrap().insert(id.clone(), span_info);
@@ -305,7 +315,7 @@ where
         let mut spaninfo = self.map.write().unwrap().remove(&id).unwrap();
         spaninfo.end = Some(Instant::now());
         self.buffer.write().unwrap().push(spaninfo);
-        if self.buffer.read().unwrap().len() > 10000 {
+        if self.buffer.read().unwrap().len() > self.config.batch_size {
             let drained: Vec<_> = self.buffer.write().unwrap().drain(..).collect();
             self.tx.try_send(Message::Span(drained)).unwrap();
         }
@@ -318,13 +328,14 @@ mod tests {
 
     #[test]
     fn event_stringify() {
+        use std::str::FromStr;
         let event = EventType::from_str("DurationBegin").unwrap();
         matches!(event, EventType::DurationBegin);
     }
 
     #[test]
     fn test_serde() {
-        let event = ChromeEvent::builder(SystemTime::now())
+        let event = ChromeEvent::builder(Instant::now())
             .arg(("a".to_string(), "a".to_string()))
             .ts(1.0)
             .build()
@@ -334,5 +345,12 @@ mod tests {
         let deserialized: ChromeEvent = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(event, deserialized);
+    }
+
+    #[test]
+    fn my_test() {
+        use tracing_subscriber::prelude::*;
+        let (writer, _guard) = ChromeLayer::with_writer(std::io::stdout);
+        tracing_subscriber::registry().with(writer).init();
     }
 }
