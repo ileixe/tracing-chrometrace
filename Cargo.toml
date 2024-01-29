@@ -1,3 +1,4 @@
+workspace = { members = ["examples/mytest"] }
 [package]
 name = "tracing-chrometrace"
 version = "0.1.19"
@@ -13,18 +14,20 @@ readme = "README.md"
 repository = "https://github.com/ileixe/tracing-chrometrace"
 
 [dependencies]
+crossbeam = "0.8.3"
 crossbeam-queue = "0.3.5"
 derivative = "2.2.0"
 derive_builder = "0.11.1"
 itertools = "0.10.3"
+kanal = "0.1.0-pre8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 strum = { version = "0.22", features = ["derive"] }
 strum_macros = "0.22"
 tokio = { version = "1.19.2", features = ["full"] }
-
 tracing = "0.1.34"
-tracing-subscriber = { version = "0.3.11", features = ["fmt", "std", "env-filter"] }
+tracing-subscriber = { version = "0.3.11", features = ["fmt", "std", "env-filter", "valuable"] }
+valuable = "0.1.0"
 
 [dev-dependencies]
 criterion = { version = "0.3", features = ["html_reports"] }
@@ -37,3 +40,4 @@ tracing-chrome = "0.5.0"
 [[bench]]
 name = "benchmark"
 harness = false
+

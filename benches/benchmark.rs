@@ -7,9 +7,16 @@ use tracing::{info, Subscriber};
 use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
 use tracing_chrometrace::ChromeLayer;
 use tracing_subscriber::{prelude::*, Layer};
+use tracing::field::valuable;
 
-#[tracing::instrument(target = "chrome_layer", fields(name = "hello", tid = 1))]
+
+// #[tracing::instrument(target = "chrome_layer", fields(name = valuable(&"hello"), tid = valuable(&1)))]
+#[tracing::instrument(target = "chrome_layer", fields(name = &"hello", tid = &1))]
 fn hello() {}
+
+fn only_span() {
+	tracing::info_span!("span test");
+}
 
 fn fmt(c: &mut Criterion) {
     let format = tracing_subscriber::fmt::format()
@@ -111,12 +118,12 @@ fn manual(c: &mut Criterion) {
 
     c.bench_function("instrument", move |b| {
         b.iter(|| {
-            let begin = SystemTime::now();
-            hello();
-            queue.push(Profile {
-                dur: begin.elapsed().unwrap(),
-                thread_id: std::thread::current().id(),
-            })
+            // let begin = SystemTime::now();
+            only_span();
+            // queue.push(Profile {
+            //     dur: begin.elapsed().unwrap(),
+            //     thread_id: std::thread::current().id(),
+            // })
         })
     });
 }
@@ -127,7 +134,7 @@ criterion_group!(
     // chrome, /* 3.22 us */
     // emptylayer, /* 200 ns */
     // manual /* 77 ns */
-    // chrometrace, /* 2 us */
-    chrometrace_parallel /* info: 2.5, instrument: 3.9 us */
+    chrometrace, /* 2 us */
+    // chrometrace_parallel /* info: 2.5, instrument: 3.9 us */
 );
 criterion_main!(benches);
