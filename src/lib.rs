@@ -10,8 +10,6 @@
 //! tracing_subscriber::registry().with(writer).init();
 //! ```
 
-#![feature(thread_id_value)]
-
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::str::FromStr;
@@ -77,6 +75,18 @@ pub enum EventType {
     ContextEnd,
 }
 
+/// Stable replacement for the unstable `ThreadId::as_u64()` (`thread_id_value`
+/// feature): a process-wide monotonic id assigned once per thread.
+fn current_thread_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
+    thread_local! {
+        static THREAD_ID: u64 = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+    }
+    THREAD_ID.with(|id| *id)
+}
+
 #[derive(Derivative, Serialize, Deserialize, Builder, Debug)]
 #[derivative(PartialEq)]
 #[builder(custom_constructor)]
@@ -112,7 +122,7 @@ pub struct ChromeEvent {
     pub id: Cow<'static, str>,
     #[builder(default = "std::process::id().into()")]
     pub pid: u64,
-    #[builder(default = "std::thread::current().id().as_u64().into()")]
+    #[builder(default = "crate::current_thread_id()")]
     pub tid: u64,
     #[builder(default, setter(each = "arg"))]
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
