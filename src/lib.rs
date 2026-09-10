@@ -191,7 +191,7 @@ fn thread_id() -> u64 {
 /// from it and which it derives.
 #[derive(Debug, Default, Clone)]
 struct Fields {
-    name: Option<String>,
+    name: Option<Cow<'static, str>>,
     cat: Option<String>,
     ph: Option<Phase>,
     ts: Option<f64>,
@@ -210,7 +210,7 @@ struct Fields {
 impl Fields {
     fn text(&mut self, name: &'static str, value: &str) {
         match name {
-            "name" => self.name = Some(value.to_owned()),
+            "name" => self.name = Some(Cow::Owned(value.to_owned())),
             "cat" => self.cat = Some(value.to_owned()),
             "id" => self.id = Some(value.to_owned()),
             "ph" => self.ph = Phase::from_str(value).ok(),
@@ -250,7 +250,7 @@ impl Fields {
     /// The event this reports at `ph`, timed against `start` when the caller named no `ts`.
     fn event(self, ph: Phase, start: Instant) -> ChromeEvent {
         ChromeEvent {
-            name: self.name.map(Cow::Owned).unwrap_or_default(),
+            name: self.name.unwrap_or_default(),
             cat: self.cat.map(Cow::Owned).unwrap_or_default(),
             ph,
             ts: self
@@ -537,14 +537,20 @@ where
 {
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
-            let mut fields = Fields::default();
+            let mut fields = Fields {
+                name: Some(Cow::Borrowed(attrs.metadata().name())),
+                ..Fields::default()
+            };
             attrs.record(&mut fields);
             span.extensions_mut().insert(fields);
         }
     }
 
     fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-        let mut fields = Fields::default();
+        let mut fields = Fields {
+            name: Some(Cow::Borrowed(event.metadata().name())),
+            ..Fields::default()
+        };
         event.record(&mut fields);
         let ph = fields.ph.unwrap_or(Phase::Instant);
         self.sink.record(fields.event(ph, self.start));
@@ -588,6 +594,75 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tracing_subscriber::prelude::*;
+
+    fn capture(record: impl FnOnce()) -> Vec<ChromeEvent> {
+        let file = temp_file::empty();
+        let (layer, trace) = ChromeLayer::with_writer(std::fs::File::create(file.path()).unwrap());
+        tracing::subscriber::with_default(tracing_subscriber::registry().with(layer), record);
+        drop(trace);
+        serde_json::from_slice(&std::fs::read(file.path()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn spans_keep_names() {
+        let events = capture(|| {
+            tracing::info_span!("forward_paged", rows = 1).in_scope(|| {});
+        });
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.name.as_ref())
+                .collect::<Vec<_>>(),
+            ["forward_paged", "forward_paged"],
+            "a span without an explicit name must keep its declared name at enter and close",
+        );
+    }
+
+    #[test]
+    fn spans_prefer_explicit() {
+        for name in ["renamed", ""] {
+            let events = capture(|| {
+                tracing::info_span!("declared", name).in_scope(|| {});
+            });
+
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|event| event.name.as_ref())
+                    .collect::<Vec<_>>(),
+                [name, name],
+                "an explicit name must win at enter and close, even when empty",
+            );
+        }
+    }
+
+    #[test]
+    fn events_keep_names() {
+        let events = capture(|| {
+            tracing::event!(name: "ready", tracing::Level::INFO, rows = 1);
+        });
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].name, "ready",
+            "an event must keep its metadata name"
+        );
+        assert_eq!(events[0].cat, "");
+    }
+
+    #[test]
+    fn events_prefer_explicit() {
+        for name in ["renamed", ""] {
+            let events = capture(|| {
+                tracing::event!(name: "ready", tracing::Level::INFO, name);
+            });
+
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].name, name, "an explicit event name must win");
+        }
+    }
 
     fn fields(named: &[(&'static str, Value)]) -> Fields {
         let mut fields = Fields::default();
