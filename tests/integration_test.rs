@@ -1,13 +1,12 @@
+use rusty_fork::rusty_fork_test;
 use std::{
     fs::{self, File},
     thread,
 };
-use rusty_fork::rusty_fork_test;
 
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_chrometrace::{ChromeEvent, ChromeLayer};
 use tracing_subscriber::prelude::*;
-
 
 rusty_fork_test! {
     #[test]
@@ -17,6 +16,39 @@ rusty_fork_test! {
         tracing_subscriber::registry().with(writer).init();
 
         tracing::info!(target = "chrome_layer", message = "hello");
+    }
+
+    /// The spec calls the closing bracket optional and `chrome://tracing` supplies it, but the
+    /// Perfetto UI rejects a trace without one, so the written file has to carry it itself.
+    #[test]
+    fn closes_the_array_past_a_flush() {
+        let file = temp_file::empty();
+        let (writer, trace) = ChromeLayer::with_writer(File::create(file.path()).unwrap());
+
+        tracing_subscriber::registry().with(writer).init();
+
+        // Enough events that the writer is called several times before the trace ends.
+        for cycle in 0..4000u64 {
+            tracing::info_span!(
+                "NPU",
+                cat = "NPU",
+                name = "Task",
+                ph = "Complete",
+                ts = cycle * 8,
+                dur = 7,
+            )
+            .in_scope(|| {});
+        }
+
+        drop(trace);
+
+        let written = fs::read_to_string(file.path()).unwrap();
+        assert!(written.starts_with('['), "the array has to open");
+        assert_eq!(written.trim_end().chars().last(), Some(']'));
+
+        let events: Vec<ChromeEvent> = serde_json::from_str(&written).unwrap();
+        assert_eq!(events.len(), 4000);
+        assert!(events.iter().all(|event| event.dur == Some(7.0)));
     }
 
     #[test]
@@ -69,8 +101,8 @@ rusty_fork_test! {
         for i in 0..4 {
             let found: Vec<i32> = events
                 .iter()
-                .filter(|e| e.args["thread"] == i.to_string())
-                .map(|e| e.args["index"].parse().unwrap())
+                .filter(|e| e.args.get("thread") == Some(&serde_json::json!(i)))
+                .map(|e| e.args.get("index").unwrap().as_i64().unwrap() as i32)
                 .collect();
 
             assert_eq!(expected, found)

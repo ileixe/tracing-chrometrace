@@ -1,8 +1,12 @@
 #![allow(unused)]
-use std::{marker::PhantomData, thread::{self, ThreadId}, time::{Duration, Instant, SystemTime}};
+use std::{
+    marker::PhantomData,
+    thread::{self, ThreadId},
+    time::{Duration, Instant, SystemTime},
+};
 
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
-use criterion::{criterion_group, criterion_main, Criterion, black_box};
 use tracing::{info, Subscriber};
 use tracing_chrome::{ChromeLayerBuilder, TraceStyle};
 use tracing_chrometrace::ChromeLayer;
@@ -30,7 +34,7 @@ fn fmt(c: &mut Criterion) {
     c.bench_function("info", |b| {
         b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
     });
-    c.bench_function("instrument", |b| b.iter(|| hello()));
+    c.bench_function("instrument", |b| b.iter(hello));
 }
 
 fn chrome(c: &mut Criterion) {
@@ -44,7 +48,7 @@ fn chrome(c: &mut Criterion) {
     c.bench_function("info", |b| {
         b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
     });
-    c.bench_function("instrument", |b| b.iter(|| hello()));
+    c.bench_function("instrument", |b| b.iter(hello));
 }
 
 fn chrometrace(c: &mut Criterion) {
@@ -57,7 +61,7 @@ fn chrometrace(c: &mut Criterion) {
     c.bench_function("info", |b| {
         b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
     });
-    c.bench_function("instrument", |b| b.iter(|| hello()));
+    c.bench_function("instrument", |b| b.iter(hello));
 }
 
 fn chrometrace_parallel(c: &mut Criterion) {
@@ -67,17 +71,60 @@ fn chrometrace_parallel(c: &mut Criterion) {
 
     tracing_subscriber::registry().with(writer).init();
 
-    std::thread::spawn(|| {
-        loop {
-            info!(target = "chrome_layer", name = "hello", tid = 2);
-            std::thread::sleep(Duration::from_nanos(1));
-        }
+    std::thread::spawn(|| loop {
+        info!(target = "chrome_layer", name = "hello", tid = 2);
+        std::thread::sleep(Duration::from_nanos(1));
     });
 
     c.bench_function("info", |b| {
         b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
     });
-    c.bench_function("instrument", |b| b.iter(|| hello()));
+    c.bench_function("instrument", |b| b.iter(hello));
+}
+
+// Needs no subscriber, so it measures the pieces without the once-per-process `init`.
+fn pieces(c: &mut Criterion) {
+    c.bench_function("process_id", |b| b.iter(|| black_box(std::process::id())));
+    c.bench_function("instant_now", |b| b.iter(|| black_box(Instant::now())));
+    c.bench_function("alloc_a_name", |b| {
+        b.iter(|| black_box(String::from("hello")))
+    });
+}
+
+fn chrometrace_sink(c: &mut Criterion) {
+    let (writer, guard) = ChromeLayer::with_writer(std::io::sink);
+
+    tracing_subscriber::registry().with(writer).init();
+
+    c.bench_function("info", |b| {
+        b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
+    });
+    c.bench_function("instrument", |b| b.iter(hello));
+}
+
+/// What a device backend emits: a span naming its own phase and carrying the cycle counts the
+/// device reported, so nothing is derived from the clock.
+fn npu(c: &mut Criterion) {
+    // The writer is held out of the measurement, so that what moves is the layer.
+    let (writer, _trace) = ChromeLayer::with_writer(std::io::sink);
+
+    tracing_subscriber::registry().with(writer).init();
+
+    c.bench_function("launch", |b| {
+        b.iter(|| {
+            let span = tracing::info_span!(
+                "NPU",
+                cat = "NPU",
+                name = "Task",
+                ph = "Complete",
+                ts = 2012429,
+                dur = 7306,
+                begin_cycle = 2012429u64,
+                end_cycle = 2019735u64,
+            );
+            let _entered = span.enter();
+        })
+    });
 }
 
 fn emptylayer(c: &mut Criterion) {
@@ -96,7 +143,7 @@ fn emptylayer(c: &mut Criterion) {
     c.bench_function("info", |b| {
         b.iter(|| info!(target = "chrome_layer", name = "hello", tid = 1))
     });
-    c.bench_function("instrument", |b| b.iter(|| hello()));
+    c.bench_function("instrument", |b| b.iter(hello));
 }
 
 fn manual(c: &mut Criterion) {
@@ -123,11 +170,12 @@ fn manual(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    // fmt, /* 1 us */
+    // One is picked at a time, because a subscriber is installed once per process.
+    // fmt, /* 1.03 us */
     // chrome, /* 3.22 us */
-    // emptylayer, /* 200 ns */
-    // manual /* 77 ns */
-    // chrometrace, /* 2 us */
-    chrometrace_parallel /* info: 2.5, instrument: 3.9 us */
+    // emptylayer, /* 6.7 ns an event, 72.7 ns a span */
+    // manual, /* 77 ns */
+    // chrometrace, /* 203 ns an event, 575 ns a span */
+    npu
 );
 criterion_main!(benches);
