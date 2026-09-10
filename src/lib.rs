@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -523,9 +523,10 @@ where
         )
     }
 
-    /// When the layer started, for a caller stamping its own `ts` against the same origin.
-    pub fn start(&self) -> SystemTime {
-        SystemTime::now() - self.start.elapsed()
+    /// What this layer measures a timestamp from. A caller reporting an extent that another
+    /// clock measured writes `ts` as microseconds past this instant, and lands on the same axis.
+    pub fn origin(&self) -> Instant {
+        self.start
     }
 }
 

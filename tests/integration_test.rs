@@ -18,6 +18,39 @@ rusty_fork_test! {
         tracing::info!(target = "chrome_layer", message = "hello");
     }
 
+    /// What `origin` is for: an event the layer stamps itself and one a caller places against
+    /// `origin` have to land on one axis, which holds only while both are microseconds past it.
+    #[test]
+    fn a_caller_places_an_event_on_the_layer_s_own_axis() {
+        let file = temp_file::empty();
+        let (writer, trace) = ChromeLayer::with_writer(File::create(file.path()).unwrap());
+        let origin = writer.origin();
+
+        tracing_subscriber::registry().with(writer).init();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let placed = origin.elapsed().as_micros() as f64;
+        tracing::info!(name = "placed", ts = placed);
+        tracing::info!(name = "stamped");
+
+        drop(trace);
+
+        let written = fs::read_to_string(file.path()).unwrap();
+        let events: Vec<ChromeEvent> = serde_json::from_str(&written).unwrap();
+        let [placed_event, stamped] = &events[..] else {
+            panic!("both events are written, got {}", events.len())
+        };
+        assert_eq!(placed_event.ts, placed);
+        // The stamped one is recorded after, so the axis agrees only if it reads later.
+        assert!(
+            stamped.ts >= placed_event.ts,
+            "stamped {} precedes placed {}, so they are not on one axis",
+            stamped.ts,
+            placed_event.ts,
+        );
+        assert!(placed_event.ts >= 20_000.0, "the placed event lands past the sleep");
+    }
+
     /// The spec calls the closing bracket optional and `chrome://tracing` supplies it, but the
     /// Perfetto UI rejects a trace without one, so the written file has to carry it itself.
     #[test]
